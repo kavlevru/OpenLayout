@@ -3,6 +3,7 @@ project(openlayout)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 find_package(Qt5Widgets REQUIRED)
+find_package(Qt5PrintSupport REQUIRED)
 find_package(OpenGL REQUIRED)
 
 include_directories("src" "src/tools" "src/objects")
@@ -88,4 +89,4 @@ add_executable(openlayout ${SOURCES} ${HEADERS})
 
 target_link_libraries(openlayout ${OPENGL_LIBRARIES})
 
-qt5_use_modules(openlayout Widgets OpenGL)
+qt5_use_modules(openlayout Widgets OpenGL PrintSupport)

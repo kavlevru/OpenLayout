@@ -4,6 +4,8 @@
 
 #include <vector>
 
+class QPrinter;
+
 #include "ToolPanel.h"
 #include "GridPanel.h"
 #include "PCB.h"
@@ -46,6 +48,8 @@ private:
     QComboBox *layerCombo = nullptr;
     QAction *layerVisAct[7];
     bool updatingLayers = false;
+
+    QPrinter *printer = nullptr;
 
     Settings settings;
 

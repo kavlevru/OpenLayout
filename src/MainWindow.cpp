@@ -9,6 +9,11 @@
 #include <QTimer>
 #include <QInputDialog>
 
+#include <QPrinter>
+#include <QPrintDialog>
+#include <QPageSetupDialog>
+#include <QPainter>
+
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -279,6 +284,29 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                 out << "X" << p.x << "Y" << p.y << "\n";
         }
         out << "T0\nM30\n";
+    });
+
+    // Printing: render the current canvas view to a printer or PDF.
+    connect(printSetupAct, &QAction::triggered, this, [this](){
+        if(!printer)
+            printer = new QPrinter;
+        QPageSetupDialog dlg(printer, this);
+        dlg.exec();
+    });
+    connect(printAct, &QAction::triggered, this, [this](){
+        if(!printer)
+            printer = new QPrinter;
+        QPrintDialog dlg(printer, this);
+        if(dlg.exec() != QDialog::Accepted)
+            return;
+        QImage img = mainCanvas->grabFramebuffer();
+        QPainter painter(printer);
+        QRect page = painter.viewport();
+        QSize size = img.size();
+        size.scale(page.size(), Qt::KeepAspectRatio);
+        painter.setViewport(page.x(), page.y(), size.width(), size.height());
+        painter.setWindow(img.rect());
+        painter.drawImage(0, 0, img);
     });
 
     // Board properties: rename and toggle multilayer.
@@ -856,4 +884,5 @@ void MainWindow::ClearHistory() {
 
 MainWindow::~MainWindow() {
     ClearHistory();
+    delete printer;
 }
