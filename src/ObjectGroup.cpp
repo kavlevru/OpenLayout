@@ -212,6 +212,12 @@ void ObjectGroup::RemoveAllConnections() {
 		object->ClearConnections();
 }
 
+void ObjectGroup::SetSelectedToLayer(uint8_t layer) {
+	for(Object *object = objects; object; object = object->next)
+		if(object->IsSelected())
+			object->layer = layer;
+}
+
 void ObjectGroup::CancelPlacing() {
 	for(Object *object = objects; object;) {
 		if(object->IsPlaced()) {

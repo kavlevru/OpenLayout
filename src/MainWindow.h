@@ -27,7 +27,7 @@ private:
     bool SaveToPath(const QString &path);
 
     void RebuildBoardTabs();   // resync the board tab bar with the PCB
-    void SyncLayerActions();   // check the layer action matching the active layer
+    void SyncLayers();         // sync the layer toolbar with the active board
 
     // Snapshot-based undo/redo: each entry is a deep clone of the active board.
     void PushUndo();        // call before a mutating operation
@@ -42,6 +42,10 @@ private:
 
     QTabBar *boardTabs;
     bool updatingTabs = false;
+
+    QComboBox *layerCombo = nullptr;
+    QAction *layerVisAct[7];
+    bool updatingLayers = false;
 
     Settings settings;
 

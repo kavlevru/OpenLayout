@@ -77,7 +77,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             return;
         pcb.SetTab(index);
         mainCanvas->SetBoard(pcb.GetSelectedBoard());
-        SyncLayerActions();
+        SyncLayers();
     });
     RebuildBoardTabs();
 
@@ -137,8 +137,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(alignHAct,      &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.GetCenter().x - o.GetCenter().x, 0.0f); }); }));
     connect(alignVAct,      &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.GetCenter().y - o.GetCenter().y); }); }));
 
-    // Layers (exclusive selection of the active layer)
-    QActionGroup *layerGroup = new QActionGroup(this);
+    // "Functions > Set to layer" moves the selected objects to that layer.
     struct LayerEntry { QAction *act; uint8_t layer; };
     LayerEntry layerEntries[] = {
         {layerC1Act, ObjectGroup::LAYER_C1}, {layerS1Act, ObjectGroup::LAYER_S1},
@@ -147,12 +146,37 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         {layerOAct,  ObjectGroup::LAYER_O},
     };
     for(const LayerEntry &e : layerEntries) {
-        e.act->setCheckable(true);
-        layerGroup->addAction(e.act);
         uint8_t layer = e.layer;
-        connect(e.act, &QAction::triggered, this, edit([layer](Board *b){ b->SetSelectedLayer(layer); }));
+        connect(e.act, &QAction::triggered, this, editUndo([layer](Board *b){ b->SetSelectedToLayer(layer); }));
     }
-    SyncLayerActions();
+
+    // Layer toolbar: active-layer selector + per-layer visibility toggles.
+    static const char *layerNames[7] = {"C1", "S1", "C2", "S2", "I1", "I2", "O"};
+    QToolBar *toolBarLayers = addToolBar(_("Layers"));
+    toolBarLayers->addWidget(new QLabel(_("Layer: ")));
+    layerCombo = new QComboBox(toolBarLayers);
+    for(int i = 0; i < 7; i++)
+        layerCombo->addItem(layerNames[i]);
+    toolBarLayers->addWidget(layerCombo);
+    connect(layerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index){
+        if(updatingLayers || index < 0)
+            return;
+        pcb.GetSelectedBoard()->SetSelectedLayer(index);
+        mainCanvas->update();
+    });
+    toolBarLayers->addSeparator();
+    toolBarLayers->addWidget(new QLabel(_("Visible: ")));
+    for(int i = 0; i < 7; i++) {
+        layerVisAct[i] = toolBarLayers->addAction(layerNames[i]);
+        layerVisAct[i]->setCheckable(true);
+        connect(layerVisAct[i], &QAction::toggled, this, [this, i](bool on){
+            if(updatingLayers)
+                return;
+            pcb.GetSelectedBoard()->SetLayerVisible(i, on);
+            mainCanvas->update();
+        });
+    }
+    SyncLayers();
 
     // Zoom
     connect(zoomBoardAct,     &QAction::triggered, this, zoom(&Board::ZoomBoard));
@@ -729,16 +753,18 @@ void MainWindow::RebuildBoardTabs() {
         boardTabs->addTab(QString("%1 (%2)").arg(pcb[i]->GetName()).arg(i + 1));
     boardTabs->setCurrentIndex(pcb.GetTab());
     updatingTabs = false;
-    SyncLayerActions();
+    SyncLayers();
 }
 
-void MainWindow::SyncLayerActions() {
-    // Index matches the ObjectGroup::Layer enum order.
-    QAction *acts[7] = {layerC1Act, layerS1Act, layerC2Act, layerS2Act,
-                        layerI1Act, layerI2Act, layerOAct};
-    uint8_t layer = pcb.GetSelectedBoard()->GetSelectedLayer();
-    if(layer < 7)
-        acts[layer]->setChecked(true);
+void MainWindow::SyncLayers() {
+    if(!layerCombo)   // toolbar not built yet (early call from RebuildBoardTabs)
+        return;
+    Board *b = pcb.GetSelectedBoard();
+    updatingLayers = true;
+    layerCombo->setCurrentIndex(b->GetSelectedLayer());
+    for(int i = 0; i < 7; i++)
+        layerVisAct[i]->setChecked(b->IsLayerVisible(i));
+    updatingLayers = false;
 }
 
 void MainWindow::PushUndo() {
