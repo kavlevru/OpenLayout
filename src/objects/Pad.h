@@ -18,6 +18,7 @@ public:
 	virtual void UpdateConnections(Object *objects) override;
     virtual Object *TestConnections(const Vec2 &pos, float radius) const override;
     virtual void RemoveConnections(Object *object) override;
+    virtual void ClearConnections() override { connections.Clear(); }
 	virtual void DrawConnections() const override;
 	virtual void DrawConnectionsSelected() const override;
 

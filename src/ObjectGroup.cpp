@@ -189,6 +189,29 @@ void ObjectGroup::DeleteSelected() {
 	}
 }
 
+void ObjectGroup::DeleteOutside(const AABB &keepConst) {
+	AABB keep = keepConst;
+	for(Object *object = objects; object;) {
+		if(!keep.TestOverlap(object->GetAABB())) {
+			if(object->next)
+				object->next->prev = object->prev;
+			if(object->prev)
+				object->prev->next = object->next;
+			else
+				objects = object->next;
+			Object *temp = object;
+			object = object->next;
+			delete temp;
+		} else
+			object = object->next;
+	}
+}
+
+void ObjectGroup::RemoveAllConnections() {
+	for(Object *object = objects; object; object = object->next)
+		object->ClearConnections();
+}
+
 void ObjectGroup::CancelPlacing() {
 	for(Object *object = objects; object;) {
 		if(object->IsPlaced()) {

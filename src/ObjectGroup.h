@@ -51,6 +51,8 @@ public:
 	void AlignSelected(Vec2(*callback)(const AABB&, const AABB&));
 
 	void DeleteSelected();
+	void DeleteOutside(const AABB &keep);   // delete objects lying fully outside keep
+	void RemoveAllConnections();            // drop every pad rubber-band connection
 	void CancelPlacing();
 
 	void DrawObjects(const ColorScheme &colors, uint8_t activeLayer, bool selected, const bool *layerVisible = nullptr) const;

@@ -30,6 +30,7 @@ public:
 	virtual void UpdateConnections(Object *objects) {}
     virtual Object *TestConnections(const Vec2 &pos, float radius) const { return nullptr; }
     virtual void RemoveConnections(Object *object) {}
+    virtual void ClearConnections() {}
 
 	void Save(File &file) const;
 	static Object *Load(File &file);

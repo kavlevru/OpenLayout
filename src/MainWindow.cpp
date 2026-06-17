@@ -204,6 +204,62 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         }
     });
 
+    // Extras that map onto engine helpers
+    connect(deleteOutsideAct, &QAction::triggered, this,
+            editUndo([](Board *b){ b->DeleteOutside(AABB(Vec2(0.0f, 0.0f), b->GetSize())); }));
+    connect(removeConAct, &QAction::triggered, this,
+            editUndo([](Board *b){ b->RemoveAllConnections(); }));
+
+    // Board properties: rename and toggle multilayer.
+    connect(boardPropAct, &QAction::triggered, this, [this](){
+        Board *b = pcb.GetSelectedBoard();
+        QDialog dlg(this);
+        dlg.setWindowTitle(_("Board properties"));
+        QFormLayout *form = new QFormLayout(&dlg);
+        QLineEdit *nameEdit = new QLineEdit(b->GetName(), &dlg);
+        QCheckBox *multi = new QCheckBox(&dlg);
+        multi->setChecked(b->IsMultilayer());
+        form->addRow(_("Name:"), nameEdit);
+        form->addRow(_("Multilayer:"), multi);
+        QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        form->addRow(bb);
+        connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        if(dlg.exec() == QDialog::Accepted) {
+            b->SetName(nameEdit->text().toLocal8Bit().constData());
+            if(multi->isChecked() != b->IsMultilayer())
+                b->ToggleMultilayer();
+            RebuildBoardTabs();
+            mainCanvas->update();
+        }
+    });
+
+    // Project info: edit the project metadata.
+    connect(projectInfoAct, &QAction::triggered, this, [this](){
+        ProjectInfo &info = pcb.info;
+        QDialog dlg(this);
+        dlg.setWindowTitle(_("Project information"));
+        QFormLayout *form = new QFormLayout(&dlg);
+        QLineEdit *title   = new QLineEdit(info.GetTitle(), &dlg);
+        QLineEdit *author  = new QLineEdit(info.GetAuthor(), &dlg);
+        QLineEdit *company = new QLineEdit(info.GetCompany(), &dlg);
+        QTextEdit *comment = new QTextEdit(info.GetComment(), &dlg);
+        form->addRow(_("Title:"),   title);
+        form->addRow(_("Author:"),  author);
+        form->addRow(_("Company:"), company);
+        form->addRow(_("Comment:"), comment);
+        QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        form->addRow(bb);
+        connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        if(dlg.exec() == QDialog::Accepted) {
+            info.SetTitle(title->text().toLocal8Bit().constData());
+            info.SetAuthor(author->text().toLocal8Bit().constData());
+            info.SetCompany(company->text().toLocal8Bit().constData());
+            info.SetComment(comment->toPlainText().toLocal8Bit().constData());
+        }
+    });
+
     // Settings / about (directories live in the same dialog)
     auto openSettings = [this]() {
         SettingsDialog dlg(settings, this);
