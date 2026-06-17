@@ -77,6 +77,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             return;
         pcb.SetTab(index);
         mainCanvas->SetBoard(pcb.GetSelectedBoard());
+        SyncLayerActions();
     });
     RebuildBoardTabs();
 
@@ -151,6 +152,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         uint8_t layer = e.layer;
         connect(e.act, &QAction::triggered, this, edit([layer](Board *b){ b->SetSelectedLayer(layer); }));
     }
+    SyncLayerActions();
 
     // Zoom
     connect(zoomBoardAct,     &QAction::triggered, this, zoom(&Board::ZoomBoard));
@@ -727,6 +729,16 @@ void MainWindow::RebuildBoardTabs() {
         boardTabs->addTab(QString("%1 (%2)").arg(pcb[i]->GetName()).arg(i + 1));
     boardTabs->setCurrentIndex(pcb.GetTab());
     updatingTabs = false;
+    SyncLayerActions();
+}
+
+void MainWindow::SyncLayerActions() {
+    // Index matches the ObjectGroup::Layer enum order.
+    QAction *acts[7] = {layerC1Act, layerS1Act, layerC2Act, layerS2Act,
+                        layerI1Act, layerI2Act, layerOAct};
+    uint8_t layer = pcb.GetSelectedBoard()->GetSelectedLayer();
+    if(layer < 7)
+        acts[layer]->setChecked(true);
 }
 
 void MainWindow::PushUndo() {

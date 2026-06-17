@@ -27,6 +27,7 @@ private:
     bool SaveToPath(const QString &path);
 
     void RebuildBoardTabs();   // resync the board tab bar with the PCB
+    void SyncLayerActions();   // check the layer action matching the active layer
 
     // Snapshot-based undo/redo: each entry is a deep clone of the active board.
     void PushUndo();        // call before a mutating operation
