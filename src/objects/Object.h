@@ -32,6 +32,8 @@ public:
     virtual void RemoveConnections(Object *object) {}
     virtual void ClearConnections() {}
 
+	virtual float GetDrillDiameter() const { return 0.0f; }  // 0 = no hole
+
 	void Save(File &file) const;
 	static Object *Load(File &file);
 
