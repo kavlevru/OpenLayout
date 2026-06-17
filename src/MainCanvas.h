@@ -15,10 +15,17 @@ class MainCanvas : public QOpenGLWidget {
     Q_OBJECT
 public:
     MainCanvas(Board *board, Settings &settings, QWidget *parent);
-    ~MainCanvas() {};
+    ~MainCanvas() { delete clipboard; }
 
     void PlaceObject(Object *object);
     void PlaceObjectGroup(const ObjectGroup &objects);
+
+    void SetBoard(Board *_board) { board = _board; update(); }
+
+    void Copy();
+    void Cut();
+    void Paste();
+    void Duplicate();
 
 public slots:
     void FinishCreating();
@@ -59,4 +66,5 @@ private:
     Vec2 currentSize;
     Board *board;
     Settings &settings;
+    ObjectGroup *clipboard = nullptr;
 };

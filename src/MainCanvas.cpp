@@ -244,6 +244,8 @@ void MainCanvas::OnKeyPressEvent(QKeyEvent *event) {
             PolygonBase::ChangeBendMode();
 			BuildTrackEnd();
 		}
+		if(key == Qt::Key_Delete)
+			board->DeleteSelected();
 	}
     update();
 }
@@ -291,5 +293,39 @@ void MainCanvas::PlaceObjectGroup(const ObjectGroup &objects) {
 	lastPlacedPoint = board->ToActiveGrid(mousePosition);
 	board->PlaceGroup(objects, mousePosition);
     update();
+}
+
+void MainCanvas::Copy() {
+	ObjectGroup *copied = board->CopySelected();
+	if(copied) {
+		delete clipboard;
+		clipboard = copied;
+	}
+}
+
+void MainCanvas::Cut() {
+	ObjectGroup *copied = board->CopySelected();
+	if(copied) {
+		delete clipboard;
+		clipboard = copied;
+		board->DeleteSelected();
+		update();
+	}
+}
+
+void MainCanvas::Paste() {
+	if(clipboard) {
+		board->UnselectAll();
+		PlaceObjectGroup(*clipboard);
+	}
+}
+
+void MainCanvas::Duplicate() {
+	ObjectGroup *dup = board->CopySelected();
+	if(dup) {
+		board->UnselectAll();
+		PlaceObjectGroup(*dup);
+		delete dup;
+	}
 }
 
