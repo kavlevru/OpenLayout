@@ -19,6 +19,14 @@ public:
 		items = nullptr;
 		Set(newItems, newCount);
 	}
+	Array &operator=(const Array &other) {
+		if(this != &other) {
+			Init(other.count);
+			for(uint32_t i = 0; i < count; i++)
+				items[i] = other.items[i];
+		}
+		return *this;
+	}
 
 	~Array() {
 		Clear();
@@ -120,8 +128,6 @@ protected:
 
 	uint32_t count;
 	T *items;
-private:
-	void operator=(const Array&) = delete;
 };
 
 template<typename T>
