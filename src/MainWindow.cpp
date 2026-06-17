@@ -2,6 +2,7 @@
 #include "Locale.h"
 
 #include "SettingsDialog.h"
+#include "Gerber.h"
 
 #include <QIcon>
 #include <QAction>
@@ -284,6 +285,40 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                 out << "X" << p.x << "Y" << p.y << "\n";
         }
         out << "T0\nM30\n";
+    });
+
+    // Gerber export: one RS-274X file per non-empty layer.
+    connect(gerberExportAct, &QAction::triggered, this, [this](){
+        QString path = QFileDialog::getSaveFileName(this, _("Export Gerber"),
+                                                    QString(), "Gerber (*.gbr);;All files (*)");
+        if(path.isEmpty())
+            return;
+        QString base = path;                       // strip extension for per-layer names
+        int dot = base.lastIndexOf('.'), slash = base.lastIndexOf('/');
+        if(dot > slash)
+            base.truncate(dot);
+        Board *b = pcb.GetSelectedBoard();
+        float h = b->GetSize().y;
+        static const char *names[7] = {"C1", "S1", "C2", "S2", "I1", "I2", "O"};
+        int written = 0;
+        for(int layer = 0; layer < 7; layer++) {
+            GerberWriter w(h);
+            bool any = false;
+            for(Object *o = b->GetObjects(); o; o = o->GetNext())
+                if(o->GetLayer() == layer) {
+                    o->ExportGerber(w);
+                    any = true;
+                }
+            if(!any)
+                continue;
+            std::ofstream out(QString("%1.%2.gbr").arg(base).arg(names[layer]).toLocal8Bit().constData());
+            if(out) {
+                w.write(out);
+                written++;
+            }
+        }
+        QMessageBox::information(this, _("Export Gerber"),
+                                 QString(_("Exported %1 layer file(s).")).arg(written));
     });
 
     // Printing: render the current canvas view to a printer or PDF.
