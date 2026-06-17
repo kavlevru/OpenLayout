@@ -26,6 +26,8 @@ private:
     void SaveFileAs();
     bool SaveToPath(const QString &path);
 
+    void RebuildBoardTabs();   // resync the board tab bar with the PCB
+
     // Snapshot-based undo/redo: each entry is a deep clone of the active board.
     void PushUndo();        // call before a mutating operation
     void Undo();
@@ -36,6 +38,9 @@ private:
     QString currentFile;
     std::vector<Board*> undoStack;
     std::vector<Board*> redoStack;
+
+    QTabBar *boardTabs;
+    bool updatingTabs = false;
 
     Settings settings;
 

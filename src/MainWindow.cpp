@@ -60,7 +60,25 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     CreateMenuBar();
 
     mainCanvas = new MainCanvas(pcb.GetSelectedBoard(), settings, this);
-    setCentralWidget(mainCanvas);
+
+    // Central area: a tab bar (one tab per board) above the canvas.
+    QWidget *central = new QWidget(this);
+    QVBoxLayout *centralLayout = new QVBoxLayout(central);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    boardTabs = new QTabBar(central);
+    boardTabs->setExpanding(false);
+    centralLayout->addWidget(boardTabs);
+    centralLayout->addWidget(mainCanvas);
+    setCentralWidget(central);
+
+    connect(boardTabs, &QTabBar::currentChanged, this, [this](int index){
+        if(updatingTabs || index < 0)
+            return;
+        pcb.SetTab(index);
+        mainCanvas->SetBoard(pcb.GetSelectedBoard());
+    });
+    RebuildBoardTabs();
 
     connect(toolPanel, SIGNAL(ToolChanged()), mainCanvas, SLOT(FinishCreating()));
     connect(mainCanvas, SIGNAL(ToolChanged(int)), toolPanel, SLOT(OnToolChanged(int)));
@@ -147,28 +165,31 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(boardNewAct, &QAction::triggered, this, [this](){
         pcb.AddBoard(new Board(_("Board"), Board::Type::Rectangle, Vec2(100.0f, 80.0f), 5.0f, false));
         mainCanvas->SetBoard(pcb.GetSelectedBoard());
+        RebuildBoardTabs();
     });
     connect(boardDeleteAct, &QAction::triggered, this, [this](){
         if(pcb.Size() > 1) {
             pcb.DeleteSelectedBoard();
             mainCanvas->SetBoard(pcb.GetSelectedBoard());
+            RebuildBoardTabs();
         }
     });
     connect(boardCopyAct, &QAction::triggered, this, [this](){
         pcb.AddBoard(new Board(*pcb.GetSelectedBoard()));
         mainCanvas->SetBoard(pcb.GetSelectedBoard());
+        RebuildBoardTabs();
     });
     connect(boardMoveLeftAct,  &QAction::triggered, this, [this](){
-        if(pcb.CanMoveLeft())  { pcb.MoveSelectedBoardLeft();  mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+        if(pcb.CanMoveLeft())  { pcb.MoveSelectedBoardLeft();  mainCanvas->SetBoard(pcb.GetSelectedBoard()); RebuildBoardTabs(); }
     });
     connect(boardMoveRightAct, &QAction::triggered, this, [this](){
-        if(pcb.CanMoveRight()) { pcb.MoveSelectedBoardRight(); mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+        if(pcb.CanMoveRight()) { pcb.MoveSelectedBoardRight(); mainCanvas->SetBoard(pcb.GetSelectedBoard()); RebuildBoardTabs(); }
     });
     connect(boardSetLeftAct,   &QAction::triggered, this, [this](){
-        if(pcb.CanMoveLeft())  { pcb.SetSelectedBoardLeft();   mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+        if(pcb.CanMoveLeft())  { pcb.SetSelectedBoardLeft();   mainCanvas->SetBoard(pcb.GetSelectedBoard()); RebuildBoardTabs(); }
     });
     connect(boardSetRightAct,  &QAction::triggered, this, [this](){
-        if(pcb.CanMoveRight()) { pcb.SetSelectedBoardRight();  mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+        if(pcb.CanMoveRight()) { pcb.SetSelectedBoardRight();  mainCanvas->SetBoard(pcb.GetSelectedBoard()); RebuildBoardTabs(); }
     });
 
     // Rotate by a custom angle (the fixed-angle rotations live above)
@@ -241,6 +262,7 @@ void MainWindow::NewFile() {
                            Vec2(100.0f, 80.0f), 5.0f, false));
     currentFile.clear();
     mainCanvas->SetBoard(pcb.GetSelectedBoard());
+    RebuildBoardTabs();
 }
 
 void MainWindow::OpenFile() {
@@ -255,6 +277,7 @@ void MainWindow::OpenFile() {
     currentFile = path;
     ClearHistory();
     mainCanvas->SetBoard(pcb.GetSelectedBoard());
+    RebuildBoardTabs();
 }
 
 void MainWindow::SaveFile() {
@@ -638,6 +661,16 @@ void MainWindow::CreateMenuBar() {
 		QMenu *menu = menuBar->addMenu(_("&Help"));
         menu->addAction(aboutAct);
 	}
+}
+
+void MainWindow::RebuildBoardTabs() {
+    updatingTabs = true;
+    while(boardTabs->count())
+        boardTabs->removeTab(0);
+    for(uint32_t i = 0; i < pcb.Size(); i++)
+        boardTabs->addTab(QString("%1 (%2)").arg(pcb[i]->GetName()).arg(i + 1));
+    boardTabs->setCurrentIndex(pcb.GetTab());
+    updatingTabs = false;
 }
 
 void MainWindow::PushUndo() {
