@@ -82,7 +82,7 @@ static const float zoomRatioButtons = 1.4f;
 
 void MainCanvas::OnWheelEvent(QWheelEvent *event) {
 	float ratio = zoomRatioWheel;
-	if(event->pixelDelta().y() < 0)
+	if(event->angleDelta().y() < 0)
 		ratio = 1.0f / ratio;
 
 	board->Zoom(ratio, event->position());
