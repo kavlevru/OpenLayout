@@ -337,6 +337,49 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                  QString(_("Exported %1 layer file(s).")).arg(written));
     });
 
+    // Isolation: approximate milling clearance = copper grown by the cutter
+    // diameter, emitted as Gerber per copper layer. Not a true single-pass
+    // toolpath (no polygon offset / overlap removal).
+    connect(isolationAct, &QAction::triggered, this, [this](){
+        bool ok = false;
+        double cutter = QInputDialog::getDouble(this, _("Isolation milling"),
+                                                _("Cutter diameter (mm):"), 0.2, 0.01, 5.0, 2, &ok);
+        if(!ok)
+            return;
+        QString path = QFileDialog::getSaveFileName(this, _("Export isolation"),
+                                                    QString(), "Gerber (*.gbr);;All files (*)");
+        if(path.isEmpty())
+            return;
+        QString base = path;
+        int dot = base.lastIndexOf('.'), slash = base.lastIndexOf('/');
+        if(dot > slash)
+            base.truncate(dot);
+        Board *b = pcb.GetSelectedBoard();
+        float h = b->GetSize().y;
+        const int copper[2] = {ObjectGroup::LAYER_C1, ObjectGroup::LAYER_C2};
+        const char *names[2] = {"C1", "C2"};
+        int written = 0;
+        for(int idx = 0; idx < 2; idx++) {
+            GerberWriter w(h);
+            w.setInflate((float)cutter);
+            bool any = false;
+            for(Object *o = b->GetObjects(); o; o = o->GetNext())
+                if(o->GetLayer() == copper[idx]) {
+                    o->ExportGerber(w);
+                    any = true;
+                }
+            if(!any)
+                continue;
+            std::ofstream out(QString("%1.iso.%2.gbr").arg(base).arg(names[idx]).toLocal8Bit().constData());
+            if(out) {
+                w.write(out);
+                written++;
+            }
+        }
+        QMessageBox::information(this, _("Export isolation"),
+                                 QString(_("Exported %1 isolation layer(s).")).arg(written));
+    });
+
     // Printing: render the current canvas view to a printer or PDF.
     connect(printSetupAct, &QAction::triggered, this, [this](){
         if(!printer)

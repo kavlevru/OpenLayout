@@ -14,8 +14,11 @@ class GerberWriter {
 public:
 	GerberWriter(float boardHeight) : height(boardHeight) {}
 
-	int circle(float dia)         { return aperture("C," + num(dia)); }
-	int rect(float w, float h)    { return aperture("R," + num(w) + "X" + num(h)); }
+	// Grow every aperture by this much (mm) — used for isolation toolpaths.
+	void setInflate(float f) { inflate = f; }
+
+	int circle(float dia)         { return aperture("C," + num(dia + inflate)); }
+	int rect(float w, float h)    { return aperture("R," + num(w + inflate) + "X" + num(h + inflate)); }
 
 	void select(int d) {
 		if(d != current) {
@@ -64,6 +67,7 @@ private:
 	}
 
 	float height;
+	float inflate = 0.0f;
 	std::ostringstream body;
 	std::map<std::string, int> defs;
 	int nextD = 10;
