@@ -6,6 +6,7 @@
 #include <QIcon>
 #include <QAction>
 #include <QVBoxLayout>
+#include <QTimer>
 
 #include "xpm/toolbar/align_bottom.xpm"
 #include "xpm/toolbar/align_hcenter.xpm"
@@ -153,17 +154,50 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         }
     });
 
-    // Settings / about
-    connect(settingsAct, &QAction::triggered, this, [this](){
+    // Settings / about (directories live in the same dialog)
+    auto openSettings = [this]() {
         SettingsDialog dlg(settings, this);
         if(dlg.exec() == QDialog::Accepted) {
             settings = dlg.Result();
             mainCanvas->update();
         }
-    });
+    };
+    connect(settingsAct,    &QAction::triggered, this, openSettings);
+    connect(directoriesAct, &QAction::triggered, this, openSettings);
     connect(aboutAct, &QAction::triggered, this, [this](){
         QMessageBox::about(this, _("About OpenLayout"),
             "OpenLayout\nhttps://github.com/nikita-yfh/OpenLayout");
+    });
+
+    // Image export: grab the rendered framebuffer and save it.
+    auto exportImage = [this](const char *fmt, const char *filter) {
+        return [this, fmt, filter]() {
+            QString path = QFileDialog::getSaveFileName(this, _("Export image"), QString(), filter);
+            if(path.isEmpty())
+                return;
+            if(!mainCanvas->grabFramebuffer().save(path, fmt))
+                QMessageBox::warning(this, _("Export image"), _("Could not export the image."));
+        };
+    };
+    connect(savePngAct, &QAction::triggered, this, exportImage("PNG", "PNG image (*.png)"));
+    connect(saveJpgAct, &QAction::triggered, this, exportImage("JPG", "JPEG image (*.jpg)"));
+    connect(saveBmpAct, &QAction::triggered, this, exportImage("BMP", "BMP image (*.bmp)"));
+    connect(saveGifAct, &QAction::triggered, this, exportImage("GIF", "GIF image (*.gif)"));
+
+    // Autosave: periodically rewrite the current file while enabled.
+    autosaveAct->setCheckable(true);
+    QTimer *autosaveTimer = new QTimer(this);
+    autosaveTimer->setInterval(60000);
+    connect(autosaveTimer, &QTimer::timeout, this, [this]() {
+        if(!currentFile.isEmpty())
+            SaveToPath(currentFile);
+    });
+    connect(autosaveAct, &QAction::toggled, this, [this, autosaveTimer](bool on) {
+        settings.autosave = on;
+        if(on)
+            autosaveTimer->start();
+        else
+            autosaveTimer->stop();
     });
 }
 
