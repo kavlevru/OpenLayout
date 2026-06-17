@@ -171,6 +171,8 @@ static const char *fileFilter = "Sprint-Layout 6 (*.lay6);;All files (*)";
 
 void MainWindow::NewFile() {
     ClearHistory();
+    for(uint32_t i = 0; i < pcb.Size(); i++)
+        delete pcb[i];
     pcb.Clear();
     pcb.AddBoard(new Board(_("Board"), Board::Type::Rectangle,
                            Vec2(100.0f, 80.0f), 5.0f, false));

@@ -58,6 +58,7 @@ public:
 	void Clear() {
 		if(items)
 			free(items);
+		items = nullptr;
 		count = 0;
 	}
 	void Add(const T &value) {
