@@ -63,6 +63,11 @@ private:
     void BuildTrackEnd();
     void BuildRect();
     void BuildCircle();
+    void DrawSelectionRect() const;
+
+    bool selecting = false;
+    Vec2 selectStart;
+    Vec2 selectEnd;
     Vec2 currentSize;
     Board *board;
     Settings &settings;

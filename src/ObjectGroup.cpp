@@ -166,6 +166,11 @@ void ObjectGroup::UnselectAll() {
 	for(Object *object = objects; object; object = object->next)
 		object->Unselect();
 }
+void ObjectGroup::SelectInRect(const AABB &rect) {
+	for(Object *object = objects; object; object = object->next)
+		if(!object->IsPlaced() && rect.Contains(object->GetAABB()))
+			object->Select();
+}
 
 void ObjectGroup::DeleteSelected() {
 	for(Object *object = objects; object;) {

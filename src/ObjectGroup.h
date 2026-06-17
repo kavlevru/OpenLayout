@@ -35,6 +35,7 @@ public:
 	void InvertSelectionGroup(Object *object);
 	void SelectAll();
 	void UnselectAll();
+	void SelectInRect(const AABB &rect);   // select objects fully inside rect
 
 	bool CanGroup() const;
 	bool CanUngroup() const;

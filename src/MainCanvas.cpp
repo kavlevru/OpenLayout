@@ -1,5 +1,6 @@
 #include "MainCanvas.h"
 
+#include "GLUtils.h"
 #include "THTPad.h"
 #include "SMDPad.h"
 #include "Track.h"
@@ -24,6 +25,21 @@ void MainCanvas::initializeGL() {
 
 void MainCanvas::paintGL() {
     board->Draw(settings, currentSize);
+    if(selecting)
+        DrawSelectionRect();
+}
+
+void MainCanvas::DrawSelectionRect() const {
+    // Drawn in board coordinates: Board::Draw leaves the projection set up
+    // with the camera/zoom transform.
+    glColor3f(0.4f, 0.4f, 0.4f);
+    glLineWidth(1.0f);
+    glBegin(GL_LINE_LOOP);
+    glutils::Vertex(Vec2(selectStart.x, selectStart.y));
+    glutils::Vertex(Vec2(selectEnd.x,   selectStart.y));
+    glutils::Vertex(Vec2(selectEnd.x,   selectEnd.y));
+    glutils::Vertex(Vec2(selectStart.x, selectEnd.y));
+    glEnd();
 }
 
 void MainCanvas::resizeGL(int w, int h) {
@@ -136,6 +152,10 @@ void MainCanvas::OnLeftDownEvent(QMouseEvent *event) {
 			if(object) {
 				mousePosition = lastPlacedPoint = object->GetNearestPoint(mouse);
 				mouseDelta = mouse - mousePosition;
+			} else {
+				// Empty space: begin a rubber-band selection.
+				selecting = true;
+				selectStart = selectEnd = mouse;
 			}
 		}
 	}
@@ -163,6 +183,11 @@ void MainCanvas::OnLeftUpEvent(QMouseEvent *event) {
 			board->CancelPlacing();
 		board->UnselectAll();
 	} else if(settings.selectedTool == TOOL_EDIT) {
+		if(selecting) {
+			selecting = false;
+			board->SelectInRect(AABB(Vec2::Min(selectStart, selectEnd),
+			                         Vec2::Max(selectStart, selectEnd)));
+		}
 		lastPlacedPoint = Vec2::Invalid();
         update();
 	}
@@ -171,7 +196,9 @@ void MainCanvas::OnLeftUpEvent(QMouseEvent *event) {
 void MainCanvas::OnMouseMotionEvent(QMouseEvent *event) {
     Vec2 mouse(board->ConvertToCoords(event->pos()));
 	if(settings.selectedTool == TOOL_EDIT && (event->buttons() & Qt::LeftButton)) {
-		if(board->IsSelected()) {
+		if(selecting) {
+			selectEnd = mouse;
+		} else if(board->IsSelected()) {
 			Vec2 _mouse = board->ToActiveGrid(mouse - mouseDelta, lastPlacedPoint);
 			Vec2 delta = _mouse - mousePosition;
 			mousePosition = _mouse;
