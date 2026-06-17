@@ -13,7 +13,10 @@ MainCanvas::MainCanvas(Board *_board, Settings &_settings, QWidget *parent)
                   firstConnectionPad(nullptr), secondConnectionPad(nullptr), firstConnectionPointSelected(false) {
     installEventFilter(this);
     setMouseTracking(true);
-    grabKeyboard();
+    // Receive key events via focus instead of a global grabKeyboard(): the
+    // grab routes events to this widget even while a modal dialog is open,
+    // which floods GTK with WIDGET_REALIZED_FOR_EVENT warnings.
+    setFocusPolicy(Qt::StrongFocus);
 }
 
 void MainCanvas::initializeGL() {
