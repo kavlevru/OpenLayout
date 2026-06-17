@@ -7,6 +7,7 @@
 #include <QAction>
 #include <QVBoxLayout>
 #include <QTimer>
+#include <QInputDialog>
 
 #include "xpm/toolbar/align_bottom.xpm"
 #include "xpm/toolbar/align_hcenter.xpm"
@@ -151,6 +152,34 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         if(pcb.Size() > 1) {
             pcb.DeleteSelectedBoard();
             mainCanvas->SetBoard(pcb.GetSelectedBoard());
+        }
+    });
+    connect(boardCopyAct, &QAction::triggered, this, [this](){
+        pcb.AddBoard(new Board(*pcb.GetSelectedBoard()));
+        mainCanvas->SetBoard(pcb.GetSelectedBoard());
+    });
+    connect(boardMoveLeftAct,  &QAction::triggered, this, [this](){
+        if(pcb.CanMoveLeft())  { pcb.MoveSelectedBoardLeft();  mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+    });
+    connect(boardMoveRightAct, &QAction::triggered, this, [this](){
+        if(pcb.CanMoveRight()) { pcb.MoveSelectedBoardRight(); mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+    });
+    connect(boardSetLeftAct,   &QAction::triggered, this, [this](){
+        if(pcb.CanMoveLeft())  { pcb.SetSelectedBoardLeft();   mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+    });
+    connect(boardSetRightAct,  &QAction::triggered, this, [this](){
+        if(pcb.CanMoveRight()) { pcb.SetSelectedBoardRight();  mainCanvas->SetBoard(pcb.GetSelectedBoard()); }
+    });
+
+    // Rotate by a custom angle (the fixed-angle rotations live above)
+    connect(rotateAct, &QAction::triggered, this, [this](){
+        bool ok = false;
+        double deg = QInputDialog::getDouble(this, _("Rotate"), _("Angle (degrees):"),
+                                             90.0, -360.0, 360.0, 1, &ok);
+        if(ok) {
+            PushUndo();
+            pcb.GetSelectedBoard()->RotateSelected(deg * M_PI / 180.0f);
+            mainCanvas->update();
         }
     });
 
