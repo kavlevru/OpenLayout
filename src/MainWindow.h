@@ -30,6 +30,7 @@ private:
 
     void RebuildBoardTabs();   // resync the board tab bar with the PCB
     void SyncLayers();         // sync the layer toolbar with the active board
+    void ImportGerberFile(const QString &path);  // parse RS-274X into objects
 
     // Snapshot-based undo/redo: each entry is a deep clone of the active board.
     void PushUndo();        // call before a mutating operation

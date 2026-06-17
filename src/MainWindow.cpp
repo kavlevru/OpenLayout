@@ -3,6 +3,10 @@
 
 #include "SettingsDialog.h"
 #include "Gerber.h"
+#include "Track.h"
+#include "Poly.h"
+#include "THTPad.h"
+#include "SMDPad.h"
 
 #include <QIcon>
 #include <QAction>
@@ -17,9 +21,13 @@
 
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <map>
 #include <vector>
 #include <cmath>
+#include <cstdlib>
+#include <cctype>
+#include <utility>
 
 #include "xpm/toolbar/align_bottom.xpm"
 #include "xpm/toolbar/align_hcenter.xpm"
@@ -285,6 +293,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                 out << "X" << p.x << "Y" << p.y << "\n";
         }
         out << "T0\nM30\n";
+    });
+
+    // Gerber import: parse an RS-274X file onto the active layer.
+    connect(gerberImportAct, &QAction::triggered, this, [this](){
+        QString path = QFileDialog::getOpenFileName(this, _("Import Gerber"),
+                                                    QString(), "Gerber (*.gbr);;All files (*)");
+        if(!path.isEmpty())
+            ImportGerberFile(path);
     });
 
     // Gerber export: one RS-274X file per non-empty layer.
@@ -851,6 +867,126 @@ void MainWindow::CreateMenuBar() {
 		QMenu *menu = menuBar->addMenu(_("&Help"));
         menu->addAction(aboutAct);
 	}
+}
+
+void MainWindow::ImportGerberFile(const QString &path) {
+    std::ifstream in(path.toLocal8Bit().constData());
+    if(!in) {
+        QMessageBox::warning(this, _("Import Gerber"), _("Could not open the file."));
+        return;
+    }
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+    Board *b = pcb.GetSelectedBoard();
+    uint8_t layer = b->GetSelectedLayer();
+    float gd = settings.groundDistance;
+    float height = b->GetSize().y;
+    PushUndo();
+
+    std::map<int, std::pair<char, Vec2>> apertures;  // dcode -> (type, size)
+    int curAp = -1;
+    double lastX = 0.0, lastY = 0.0;
+    std::vector<Vec2> poly;
+    bool inRegion = false, building = false;
+
+    auto toBoard = [&](double rx, double ry){ return Vec2((float)(rx / 1e6), (float)(height - ry / 1e6)); };
+    auto flushTrack = [&](){
+        if(building && poly.size() >= 2 && apertures.count(curAp))
+            b->AddObjectEnd(new Track(layer, gd, apertures[curAp].second.x, poly.data(), poly.size()));
+        building = false;
+        poly.clear();
+    };
+
+    size_t i = 0;
+    while(i < content.size()) {
+        char c = content[i];
+        if(c == '%') {
+            size_t end = content.find('%', i + 1);
+            if(end == std::string::npos) break;
+            std::string cmd = content.substr(i + 1, end - i - 1);
+            while(!cmd.empty() && (cmd.back() == '*' || cmd.back() == '\n' || cmd.back() == '\r'))
+                cmd.pop_back();
+            if(cmd.rfind("ADD", 0) == 0) {
+                size_t p = 3;
+                int dcode = 0;
+                while(p < cmd.size() && isdigit(cmd[p])) dcode = dcode * 10 + (cmd[p++] - '0');
+                size_t comma = cmd.find(',', p);
+                if(p < cmd.size() && comma != std::string::npos) {
+                    char type = cmd[p];
+                    std::string rest = cmd.substr(comma + 1);
+                    if(type == 'C')
+                        apertures[dcode] = {'C', Vec2(atof(rest.c_str()), atof(rest.c_str()))};
+                    else if(type == 'R') {
+                        size_t x = rest.find('X');
+                        float w = atof(rest.c_str());
+                        float h = (x != std::string::npos) ? atof(rest.c_str() + x + 1) : w;
+                        apertures[dcode] = {'R', Vec2(w, h)};
+                    }
+                }
+            }
+            i = end + 1;
+            continue;
+        }
+        if(c == '\n' || c == '\r' || c == ' ' || c == '\t') { i++; continue; }
+        size_t end = content.find('*', i);
+        if(end == std::string::npos) break;
+        std::string blk = content.substr(i, end - i);
+        i = end + 1;
+
+        if(blk == "G36") { flushTrack(); inRegion = true; poly.clear(); continue; }
+        if(blk == "G37") {
+            if(poly.size() >= 3)
+                b->AddObjectEnd(new Poly(layer, gd, 0.0f, poly.data(), poly.size(), false));
+            poly.clear(); inRegion = false; continue;
+        }
+        if(blk == "M02" || blk == "M00") { flushTrack(); break; }
+        if(!blk.empty() && blk[0] == 'G') {            // strip leading G-code
+            size_t k = 0;
+            while(k < blk.size() && (blk[k] == 'G' || isdigit(blk[k]))) k++;
+            if(k >= blk.size()) continue;
+            blk = blk.substr(k);
+        }
+        if(!blk.empty() && blk[0] == 'D' && blk.find('X') == std::string::npos
+                        && blk.find('Y') == std::string::npos) {
+            int d = atoi(blk.c_str() + 1);
+            if(d >= 10) { flushTrack(); curAp = d; }
+            continue;
+        }
+
+        double x = lastX, y = lastY;
+        int dcmd = -1;
+        for(size_t p = 0; p < blk.size();) {
+            char ch = blk[p];
+            if(ch == 'X' || ch == 'Y') {
+                size_t s = ++p;
+                while(p < blk.size() && (isdigit(blk[p]) || blk[p] == '-' || blk[p] == '+')) p++;
+                double v = atof(blk.substr(s, p - s).c_str());
+                if(ch == 'X') x = v; else y = v;
+            } else if(ch == 'D') {
+                dcmd = atoi(blk.c_str() + p + 1);
+                break;
+            } else p++;
+        }
+        lastX = x; lastY = y;
+        Vec2 pt = toBoard(x, y);
+        if(inRegion) {
+            poly.push_back(pt);
+        } else if(dcmd == 2) {
+            flushTrack(); building = true; poly.push_back(pt);
+        } else if(dcmd == 1) {
+            if(!building) building = true;
+            poly.push_back(pt);
+        } else if(dcmd == 3 && curAp >= 0 && apertures.count(curAp)) {
+            flushTrack();
+            std::pair<char, Vec2> ap = apertures[curAp];
+            if(ap.first == 'C')
+                b->AddObjectEnd(new THTPad(layer, gd, pt, PadSize(ap.second.x, 0.0f), THTPad::S_CIRCLE, false));
+            else
+                b->AddObjectEnd(new SMDPad(layer, gd, pt, ap.second));
+        }
+    }
+    flushTrack();
+    mainCanvas->update();
 }
 
 void MainWindow::RebuildBoardTabs() {
