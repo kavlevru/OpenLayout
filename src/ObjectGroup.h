@@ -27,6 +27,11 @@ public:
 	Object *GetObjects();
 	AABB GetObjectsAABB() const;
 
+	// Returns a new heap group with clones of the selected objects, centered
+	// on (0, 0) so it can be dropped anywhere via PlaceGroup. nullptr if the
+	// selection is empty.
+	ObjectGroup *CopySelected() const;
+
 	void InvertSelectionGroup(Object *object);
 	void SelectAll();
 	void UnselectAll();

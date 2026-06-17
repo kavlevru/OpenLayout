@@ -14,6 +14,22 @@ ObjectGroup::ObjectGroup() {
 	objects = nullptr;
 }
 
+ObjectGroup *ObjectGroup::CopySelected() const {
+	ObjectGroup *group = new ObjectGroup();
+	Object *last = nullptr;
+	for(const Object *object = objects; object; object = object->next)
+		if(object->IsSelected())
+			last = group->AddObjectEnd(object->Clone(), last);
+	if(group->IsEmpty()) {
+		delete group;
+		return nullptr;
+	}
+	Vec2 center = group->GetObjectsAABB().GetCenter();
+	for(Object *object = group->objects; object; object = object->next)
+		object->Move(Vec2(-center.x, -center.y));
+	return group;
+}
+
 ObjectGroup::~ObjectGroup() {
 	while(objects) {
 		Object *next = objects->next;
