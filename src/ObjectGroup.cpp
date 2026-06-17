@@ -237,6 +237,8 @@ void ObjectGroup::GroupSelected() {
 }
 
 void ObjectGroup::UngroupSelected() {
+	if(!IsSelected())
+		return;
 	uint32_t max = GetMaxSelectedGroup();
 	uint32_t groupCount[max + 1] = {0};
 	for(const Object *object = objects; object; object = object->next)
@@ -290,6 +292,8 @@ void ObjectGroup::MoveSelected(const Vec2 &d) {
 }
 
 void ObjectGroup::RotateSelected(float angle) {
+	if(!IsSelected())
+		return;
 	Vec2 center = GetSelectedCenter();
 	for(Object *object = objects; object; object = object->next)
 		if(object->IsSelected())
@@ -297,6 +301,8 @@ void ObjectGroup::RotateSelected(float angle) {
 }
 
 void ObjectGroup::MirrorSelectedHorizontal() {
+	if(!IsSelected())
+		return;
 	Vec2 center = GetSelectedCenter();
 	for(Object *object = objects; object; object = object->next)
 		if(object->IsSelected())
@@ -304,6 +310,8 @@ void ObjectGroup::MirrorSelectedHorizontal() {
 }
 
 void ObjectGroup::MirrorSelectedVertical() {
+	if(!IsSelected())
+		return;
 	Vec2 center = GetSelectedCenter();
 	for(Object *object = objects; object; object = object->next)
 		if(object->IsSelected())
@@ -311,6 +319,8 @@ void ObjectGroup::MirrorSelectedVertical() {
 }
 
 void ObjectGroup::AlignSelected(Vec2(*callback)(const AABB&, const AABB&)) {
+	if(!IsSelected())
+		return;
 	uint32_t max = GetMaxSelectedGroup();
 	AABB aabb[max + 1];
 	for(int i = 0; i <= max; i++)
