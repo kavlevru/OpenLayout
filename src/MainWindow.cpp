@@ -235,6 +235,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             editUndo([](Board *b){ b->DeleteOutside(AABB(Vec2(0.0f, 0.0f), b->GetSize())); }));
     connect(removeConAct, &QAction::triggered, this,
             editUndo([](Board *b){ b->RemoveAllConnections(); }));
+    connect(changeSideAct, &QAction::triggered, this,
+            editUndo([](Board *b){ b->ChangeSide(b->GetSize().x * 0.5f); }));
 
     // Board properties: rename and toggle multilayer.
     connect(boardPropAct, &QAction::triggered, this, [this](){

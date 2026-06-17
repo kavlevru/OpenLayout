@@ -51,6 +51,7 @@ public:
 	void AlignSelected(Vec2(*callback)(const AABB&, const AABB&));
 
 	void SetSelectedToLayer(uint8_t layer); // move the selected objects to a layer
+	void ChangeSide(float mirrorX);         // flip to the other board side
 	void DeleteSelected();
 	void DeleteOutside(const AABB &keep);   // delete objects lying fully outside keep
 	void RemoveAllConnections();            // drop every pad rubber-band connection

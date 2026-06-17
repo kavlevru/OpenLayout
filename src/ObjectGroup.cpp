@@ -218,6 +218,17 @@ void ObjectGroup::SetSelectedToLayer(uint8_t layer) {
 			object->layer = layer;
 }
 
+void ObjectGroup::ChangeSide(float mirrorX) {
+	// Mirror every object horizontally and swap the top/bottom layer pairs.
+	static const uint8_t swap[7] = {LAYER_C2, LAYER_S2, LAYER_C1, LAYER_S1,
+	                                LAYER_I2, LAYER_I1, LAYER_O};
+	for(Object *object = objects; object; object = object->next) {
+		object->MirrorHorizontal(mirrorX);
+		if(object->layer < 7)
+			object->layer = swap[object->layer];
+	}
+}
+
 void ObjectGroup::CancelPlacing() {
 	for(Object *object = objects; object;) {
 		if(object->IsPlaced()) {
