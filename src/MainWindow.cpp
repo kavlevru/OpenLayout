@@ -48,7 +48,9 @@
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     File file("/storage/diy/pcb/1.lay6", "rb");
-    pcb.Load(file);
+    if(!file.IsOk() || !pcb.Load(file))
+        pcb.AddBoard(new Board(_("Board"), Board::Type::Rectangle,
+                               Vec2(100.0f, 80.0f), 5.0f, false));
 
     CreateActions();
     CreateToolBar();
