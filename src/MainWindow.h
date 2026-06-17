@@ -2,6 +2,8 @@
 #include <QMainWindow>
 #include <QtWidgets>
 
+#include <vector>
+
 #include "ToolPanel.h"
 #include "GridPanel.h"
 #include "PCB.h"
@@ -24,7 +26,16 @@ private:
     void SaveFileAs();
     bool SaveToPath(const QString &path);
 
+    // Snapshot-based undo/redo: each entry is a deep clone of the active board.
+    void PushUndo();        // call before a mutating operation
+    void Undo();
+    void Redo();
+    void ClearRedo();
+    void ClearHistory();    // drop all snapshots (e.g. on New/Open)
+
     QString currentFile;
+    std::vector<Board*> undoStack;
+    std::vector<Board*> redoStack;
 
     Settings settings;
 

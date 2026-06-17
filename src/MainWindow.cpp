@@ -67,6 +67,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto edit = [this](auto op) {
         return [this, op]() { op(pcb.GetSelectedBoard()); mainCanvas->update(); };
     };
+    // Like edit(), but snapshots the board for undo before mutating it.
+    auto editUndo = [this](auto op) {
+        return [this, op]() { PushUndo(); op(pcb.GetSelectedBoard()); mainCanvas->update(); };
+    };
     // Helper: build a zoom handler that needs the current canvas size.
     auto zoom = [this](void (Board::*fn)(const Vec2&)) {
         return [this, fn]() {
@@ -83,31 +87,34 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(exitAct,   &QAction::triggered, this, &MainWindow::close);
 
     // Edit
-    connect(deleteAct,    &QAction::triggered, this, edit([](Board *b){ b->DeleteSelected(); }));
+    connect(undoAct, &QAction::triggered, this, &MainWindow::Undo);
+    connect(redoAct, &QAction::triggered, this, &MainWindow::Redo);
+
+    connect(deleteAct,    &QAction::triggered, this, editUndo([](Board *b){ b->DeleteSelected(); }));
     connect(selectallAct, &QAction::triggered, this, edit([](Board *b){ b->SelectAll(); }));
     connect(copyAct,      &QAction::triggered, mainCanvas, &MainCanvas::Copy);
-    connect(cutAct,       &QAction::triggered, mainCanvas, &MainCanvas::Cut);
-    connect(pasteAct,     &QAction::triggered, mainCanvas, &MainCanvas::Paste);
-    connect(duplicateAct, &QAction::triggered, mainCanvas, &MainCanvas::Duplicate);
-    connect(groupAct,     &QAction::triggered, this, edit([](Board *b){ b->GroupSelected(); }));
-    connect(ungroupAct,   &QAction::triggered, this, edit([](Board *b){ b->UngroupSelected(); }));
-    connect(snapGridAct,  &QAction::triggered, this, edit([](Board *b){ b->SnapSelectedToGrid(); }));
+    connect(cutAct,       &QAction::triggered, this, [this](){ PushUndo(); mainCanvas->Cut(); });
+    connect(pasteAct,     &QAction::triggered, this, [this](){ PushUndo(); mainCanvas->Paste(); });
+    connect(duplicateAct, &QAction::triggered, this, [this](){ PushUndo(); mainCanvas->Duplicate(); });
+    connect(groupAct,     &QAction::triggered, this, editUndo([](Board *b){ b->GroupSelected(); }));
+    connect(ungroupAct,   &QAction::triggered, this, editUndo([](Board *b){ b->UngroupSelected(); }));
+    connect(snapGridAct,  &QAction::triggered, this, editUndo([](Board *b){ b->SnapSelectedToGrid(); }));
 
     // Rotate / mirror
-    connect(rotate90Act, &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 2.0f); }));
-    connect(rotate45Act, &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 4.0f); }));
-    connect(rotate15Act, &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 12.0f); }));
-    connect(rotate5Act,  &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 36.0f); }));
-    connect(hmirrorAct,  &QAction::triggered, this, edit([](Board *b){ b->MirrorSelectedHorizontal(); }));
-    connect(vmirrorAct,  &QAction::triggered, this, edit([](Board *b){ b->MirrorSelectedVertical(); }));
+    connect(rotate90Act, &QAction::triggered, this, editUndo([](Board *b){ b->RotateSelected(M_PI / 2.0f); }));
+    connect(rotate45Act, &QAction::triggered, this, editUndo([](Board *b){ b->RotateSelected(M_PI / 4.0f); }));
+    connect(rotate15Act, &QAction::triggered, this, editUndo([](Board *b){ b->RotateSelected(M_PI / 12.0f); }));
+    connect(rotate5Act,  &QAction::triggered, this, editUndo([](Board *b){ b->RotateSelected(M_PI / 36.0f); }));
+    connect(hmirrorAct,  &QAction::triggered, this, editUndo([](Board *b){ b->MirrorSelectedHorizontal(); }));
+    connect(vmirrorAct,  &QAction::triggered, this, editUndo([](Board *b){ b->MirrorSelectedVertical(); }));
 
     // Align (callback returns the move delta for each selected object)
-    connect(alignLeftAct,   &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.lower.x - o.lower.x, 0.0f); }); }));
-    connect(alignRightAct,  &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.upper.x - o.upper.x, 0.0f); }); }));
-    connect(alignTopAct,    &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.lower.y - o.lower.y); }); }));
-    connect(alignBottomAct, &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.upper.y - o.upper.y); }); }));
-    connect(alignHAct,      &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.GetCenter().x - o.GetCenter().x, 0.0f); }); }));
-    connect(alignVAct,      &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.GetCenter().y - o.GetCenter().y); }); }));
+    connect(alignLeftAct,   &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.lower.x - o.lower.x, 0.0f); }); }));
+    connect(alignRightAct,  &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.upper.x - o.upper.x, 0.0f); }); }));
+    connect(alignTopAct,    &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.lower.y - o.lower.y); }); }));
+    connect(alignBottomAct, &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.upper.y - o.upper.y); }); }));
+    connect(alignHAct,      &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.GetCenter().x - o.GetCenter().x, 0.0f); }); }));
+    connect(alignVAct,      &QAction::triggered, this, editUndo([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.GetCenter().y - o.GetCenter().y); }); }));
 
     // Layers (exclusive selection of the active layer)
     QActionGroup *layerGroup = new QActionGroup(this);
@@ -163,6 +170,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 static const char *fileFilter = "Sprint-Layout 6 (*.lay6);;All files (*)";
 
 void MainWindow::NewFile() {
+    ClearHistory();
     pcb.Clear();
     pcb.AddBoard(new Board(_("Board"), Board::Type::Rectangle,
                            Vec2(100.0f, 80.0f), 5.0f, false));
@@ -180,6 +188,7 @@ void MainWindow::OpenFile() {
         return;
     }
     currentFile = path;
+    ClearHistory();
     mainCanvas->SetBoard(pcb.GetSelectedBoard());
 }
 
@@ -566,5 +575,48 @@ void MainWindow::CreateMenuBar() {
 	}
 }
 
+void MainWindow::PushUndo() {
+    ClearRedo();
+    undoStack.push_back(new Board(*pcb.GetSelectedBoard()));
+    if((int)undoStack.size() > MAX_UNDO_DEPTH) {
+        delete undoStack.front();
+        undoStack.erase(undoStack.begin());
+    }
+}
+
+void MainWindow::Undo() {
+    if(undoStack.empty())
+        return;
+    redoStack.push_back(pcb.GetSelectedBoard());
+    Board *prev = undoStack.back();
+    undoStack.pop_back();
+    pcb.SetSelectedBoard(prev);
+    mainCanvas->SetBoard(prev);
+}
+
+void MainWindow::Redo() {
+    if(redoStack.empty())
+        return;
+    undoStack.push_back(pcb.GetSelectedBoard());
+    Board *next = redoStack.back();
+    redoStack.pop_back();
+    pcb.SetSelectedBoard(next);
+    mainCanvas->SetBoard(next);
+}
+
+void MainWindow::ClearRedo() {
+    for(Board *b : redoStack)
+        delete b;
+    redoStack.clear();
+}
+
+void MainWindow::ClearHistory() {
+    for(Board *b : undoStack)
+        delete b;
+    undoStack.clear();
+    ClearRedo();
+}
+
 MainWindow::~MainWindow() {
+    ClearHistory();
 }
