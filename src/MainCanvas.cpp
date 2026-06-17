@@ -36,7 +36,7 @@ void MainCanvas::FinishCreating() {
 		board->CancelPlacing();
 	placedPointCount = 0;
 	lastPlacedPoint = Vec2::Invalid();
-    repaint();
+    update();
 }
 
 bool MainCanvas::eventFilter(QObject *obj, QEvent *event) {
@@ -87,7 +87,7 @@ void MainCanvas::OnWheelEvent(QWheelEvent *event) {
 
 	board->Zoom(ratio, event->position());
 
-    repaint();
+    update();
 }
 
 void MainCanvas::OnLeftDownEvent(QMouseEvent *event) {
@@ -136,7 +136,7 @@ void MainCanvas::OnLeftDownEvent(QMouseEvent *event) {
 			}
 		}
 	}
-    repaint();
+    update();
 }
 
 void MainCanvas::OnMiddleDownEvent(QMouseEvent *event) {
@@ -151,7 +151,7 @@ void MainCanvas::OnRightDownEvent(QMouseEvent *event) {
             emit ToolChanged(TOOL_EDIT);
 		FinishCreating();
     }
-    repaint();
+    update();
 }
 
 void MainCanvas::OnLeftUpEvent(QMouseEvent *event) {
@@ -161,7 +161,7 @@ void MainCanvas::OnLeftUpEvent(QMouseEvent *event) {
 		board->UnselectAll();
 	} else if(settings.selectedTool == TOOL_EDIT) {
 		lastPlacedPoint = Vec2::Invalid();
-        repaint();
+        update();
 	}
 }
 
@@ -231,7 +231,7 @@ void MainCanvas::OnMouseMotionEvent(QMouseEvent *event) {
 		board->UpdateCamera(delta);
 	}
     dragPosition = board->ConvertToCoords(event->pos());
-    repaint();
+    update();
 }
 
 void MainCanvas::OnKeyPressEvent(QKeyEvent *event) {
@@ -245,19 +245,19 @@ void MainCanvas::OnKeyPressEvent(QKeyEvent *event) {
 			BuildTrackEnd();
 		}
 	}
-    repaint();
+    update();
 }
 
 void MainCanvas::OnKeyReleaseEvent(QKeyEvent *event) {
     UpdateBoardGrid(event);
-    repaint();
+    update();
 }
 
 void MainCanvas::OnLeaveWindowEvent() {
 	if(board->GetFirstPlaced() && board->GetFirstPlaced()->groups.Empty() && !placedPointCount) {
 		board->CancelPlacing();
 		lastPlacedPoint = Vec2::Invalid();
-        repaint();
+        update();
 	}
 }
 
@@ -290,6 +290,6 @@ void MainCanvas::PlaceObject(Object *object) {
 void MainCanvas::PlaceObjectGroup(const ObjectGroup &objects) {
 	lastPlacedPoint = board->ToActiveGrid(mousePosition);
 	board->PlaceGroup(objects, mousePosition);
-    repaint();
+    update();
 }
 
