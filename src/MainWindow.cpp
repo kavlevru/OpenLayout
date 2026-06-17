@@ -380,6 +380,60 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                  QString(_("Exported %1 isolation layer(s).")).arg(written));
     });
 
+    // Save macro / export elements: write the selected objects to a file
+    // (OpenLayout's own binary object format).
+    auto saveSelected = [this](){
+        Board *b = pcb.GetSelectedBoard();
+        if(!b->IsSelected()) {
+            QMessageBox::information(this, _("Save macro"), _("Nothing is selected."));
+            return;
+        }
+        QString path = QFileDialog::getSaveFileName(this, _("Save macro"), QString(),
+                                                    "OpenLayout macro (*.olm);;All files (*)");
+        if(path.isEmpty())
+            return;
+        if(!path.contains('.'))
+            path += ".olm";
+        File f(path.toLocal8Bit().constData(), "wb");
+        if(!f.IsOk()) {
+            QMessageBox::warning(this, _("Save macro"), _("Could not write the file."));
+            return;
+        }
+        uint32_t n = 0;
+        for(Object *o = b->GetObjects(); o; o = o->GetNext())
+            if(o->IsSelected()) n++;
+        f.Write<uint32_t>(n);
+        for(Object *o = b->GetObjects(); o; o = o->GetNext())
+            if(o->IsSelected()) o->Save(f);
+    };
+    connect(saveMacroAct,     &QAction::triggered, this, saveSelected);
+    connect(elementExportAct, &QAction::triggered, this, saveSelected);
+
+    // Import elements / load macro: append objects from such a file.
+    connect(elementImportAct, &QAction::triggered, this, [this](){
+        QString path = QFileDialog::getOpenFileName(this, _("Import elements"), QString(),
+                                                    "OpenLayout macro (*.olm);;All files (*)");
+        if(path.isEmpty())
+            return;
+        File f(path.toLocal8Bit().constData(), "rb");
+        if(!f.IsOk()) {
+            QMessageBox::warning(this, _("Import elements"), _("Could not open the file."));
+            return;
+        }
+        PushUndo();
+        Board *b = pcb.GetSelectedBoard();
+        b->UnselectAll();
+        uint32_t n = f.Read<uint32_t>();
+        for(uint32_t i = 0; i < n; i++) {
+            Object *o = Object::Load(f);
+            if(o) {
+                o->Select();
+                b->AddObjectEnd(o);
+            }
+        }
+        mainCanvas->update();
+    });
+
     // Printing: render the current canvas view to a printer or PDF.
     connect(printSetupAct, &QAction::triggered, this, [this](){
         if(!printer)
