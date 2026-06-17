@@ -18,6 +18,14 @@ private:
     void CreateToolBar();
     void CreateLeftPanel();
 
+    void NewFile();
+    void OpenFile();
+    void SaveFile();
+    void SaveFileAs();
+    bool SaveToPath(const QString &path);
+
+    QString currentFile;
+
     Settings settings;
 
     QToolBar *toolBarMain, *toolBarHistory, *toolBarClipboard,

@@ -62,6 +62,152 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     connect(toolPanel, SIGNAL(ToolChanged()), mainCanvas, SLOT(FinishCreating()));
     connect(mainCanvas, SIGNAL(ToolChanged(int)), toolPanel, SLOT(OnToolChanged(int)));
+
+    // Helper: run an operation on the active board, then refresh the canvas.
+    auto edit = [this](auto op) {
+        return [this, op]() { op(pcb.GetSelectedBoard()); mainCanvas->update(); };
+    };
+    // Helper: build a zoom handler that needs the current canvas size.
+    auto zoom = [this](void (Board::*fn)(const Vec2&)) {
+        return [this, fn]() {
+            (pcb.GetSelectedBoard()->*fn)(Vec2(mainCanvas->width(), mainCanvas->height()));
+            mainCanvas->update();
+        };
+    };
+
+    // File
+    connect(newAct,    &QAction::triggered, this, &MainWindow::NewFile);
+    connect(openAct,   &QAction::triggered, this, &MainWindow::OpenFile);
+    connect(saveAct,   &QAction::triggered, this, &MainWindow::SaveFile);
+    connect(saveasAct, &QAction::triggered, this, &MainWindow::SaveFileAs);
+    connect(exitAct,   &QAction::triggered, this, &MainWindow::close);
+
+    // Edit
+    connect(deleteAct,    &QAction::triggered, this, edit([](Board *b){ b->DeleteSelected(); }));
+    connect(selectallAct, &QAction::triggered, this, edit([](Board *b){ b->SelectAll(); }));
+    connect(copyAct,      &QAction::triggered, mainCanvas, &MainCanvas::Copy);
+    connect(cutAct,       &QAction::triggered, mainCanvas, &MainCanvas::Cut);
+    connect(pasteAct,     &QAction::triggered, mainCanvas, &MainCanvas::Paste);
+    connect(duplicateAct, &QAction::triggered, mainCanvas, &MainCanvas::Duplicate);
+    connect(groupAct,     &QAction::triggered, this, edit([](Board *b){ b->GroupSelected(); }));
+    connect(ungroupAct,   &QAction::triggered, this, edit([](Board *b){ b->UngroupSelected(); }));
+    connect(snapGridAct,  &QAction::triggered, this, edit([](Board *b){ b->SnapSelectedToGrid(); }));
+
+    // Rotate / mirror
+    connect(rotate90Act, &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 2.0f); }));
+    connect(rotate45Act, &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 4.0f); }));
+    connect(rotate15Act, &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 12.0f); }));
+    connect(rotate5Act,  &QAction::triggered, this, edit([](Board *b){ b->RotateSelected(M_PI / 36.0f); }));
+    connect(hmirrorAct,  &QAction::triggered, this, edit([](Board *b){ b->MirrorSelectedHorizontal(); }));
+    connect(vmirrorAct,  &QAction::triggered, this, edit([](Board *b){ b->MirrorSelectedVertical(); }));
+
+    // Align (callback returns the move delta for each selected object)
+    connect(alignLeftAct,   &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.lower.x - o.lower.x, 0.0f); }); }));
+    connect(alignRightAct,  &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.upper.x - o.upper.x, 0.0f); }); }));
+    connect(alignTopAct,    &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.lower.y - o.lower.y); }); }));
+    connect(alignBottomAct, &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.upper.y - o.upper.y); }); }));
+    connect(alignHAct,      &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(a.GetCenter().x - o.GetCenter().x, 0.0f); }); }));
+    connect(alignVAct,      &QAction::triggered, this, edit([](Board *b){ b->AlignSelected(+[](const AABB &a, const AABB &o){ return Vec2(0.0f, a.GetCenter().y - o.GetCenter().y); }); }));
+
+    // Layers (exclusive selection of the active layer)
+    QActionGroup *layerGroup = new QActionGroup(this);
+    struct LayerEntry { QAction *act; uint8_t layer; };
+    LayerEntry layerEntries[] = {
+        {layerC1Act, ObjectGroup::LAYER_C1}, {layerS1Act, ObjectGroup::LAYER_S1},
+        {layerC2Act, ObjectGroup::LAYER_C2}, {layerS2Act, ObjectGroup::LAYER_S2},
+        {layerI1Act, ObjectGroup::LAYER_I1}, {layerI2Act, ObjectGroup::LAYER_I2},
+        {layerOAct,  ObjectGroup::LAYER_O},
+    };
+    for(const LayerEntry &e : layerEntries) {
+        e.act->setCheckable(true);
+        layerGroup->addAction(e.act);
+        uint8_t layer = e.layer;
+        connect(e.act, &QAction::triggered, this, edit([layer](Board *b){ b->SetSelectedLayer(layer); }));
+    }
+
+    // Zoom
+    connect(zoomBoardAct,     &QAction::triggered, this, zoom(&Board::ZoomBoard));
+    connect(zoomObjectsAct,   &QAction::triggered, this, zoom(&Board::ZoomObjects));
+    connect(zoomSelectionAct, &QAction::triggered, this, zoom(&Board::ZoomSelection));
+
+    // View
+    transparentAct->setCheckable(true);
+    connect(transparentAct, &QAction::toggled, this, [this](bool on){ settings.transparent = on; mainCanvas->update(); });
+
+    // Board tabs
+    connect(boardNewAct, &QAction::triggered, this, [this](){
+        pcb.AddBoard(new Board(_("Board"), Board::Type::Rectangle, Vec2(100.0f, 80.0f), 5.0f, false));
+        mainCanvas->SetBoard(pcb.GetSelectedBoard());
+    });
+    connect(boardDeleteAct, &QAction::triggered, this, [this](){
+        if(pcb.Size() > 1) {
+            pcb.DeleteSelectedBoard();
+            mainCanvas->SetBoard(pcb.GetSelectedBoard());
+        }
+    });
+
+    // Settings / about
+    connect(settingsAct, &QAction::triggered, this, [this](){
+        SettingsDialog dlg(settings, this);
+        if(dlg.exec() == QDialog::Accepted) {
+            settings = dlg.Result();
+            mainCanvas->update();
+        }
+    });
+    connect(aboutAct, &QAction::triggered, this, [this](){
+        QMessageBox::about(this, _("About OpenLayout"),
+            "OpenLayout\nhttps://github.com/nikita-yfh/OpenLayout");
+    });
+}
+
+static const char *fileFilter = "Sprint-Layout 6 (*.lay6);;All files (*)";
+
+void MainWindow::NewFile() {
+    pcb.Clear();
+    pcb.AddBoard(new Board(_("Board"), Board::Type::Rectangle,
+                           Vec2(100.0f, 80.0f), 5.0f, false));
+    currentFile.clear();
+    mainCanvas->SetBoard(pcb.GetSelectedBoard());
+}
+
+void MainWindow::OpenFile() {
+    QString path = QFileDialog::getOpenFileName(this, _("Open"), QString(), fileFilter);
+    if(path.isEmpty())
+        return;
+    File file(path.toLocal8Bit().constData(), "rb");
+    if(!file.IsOk() || !pcb.Load(file)) {
+        QMessageBox::warning(this, _("Open"), _("Could not open file."));
+        return;
+    }
+    currentFile = path;
+    mainCanvas->SetBoard(pcb.GetSelectedBoard());
+}
+
+void MainWindow::SaveFile() {
+    if(currentFile.isEmpty())
+        SaveFileAs();
+    else
+        SaveToPath(currentFile);
+}
+
+void MainWindow::SaveFileAs() {
+    QString path = QFileDialog::getSaveFileName(this, _("Save as"), QString(), fileFilter);
+    if(path.isEmpty())
+        return;
+    if(!path.contains('.'))
+        path += ".lay6";
+    if(SaveToPath(path))
+        currentFile = path;
+}
+
+bool MainWindow::SaveToPath(const QString &path) {
+    File file(path.toLocal8Bit().constData(), "wb");
+    if(!file.IsOk()) {
+        QMessageBox::warning(this, _("Save"), _("Could not write file."));
+        return false;
+    }
+    pcb.Save(file);
+    return true;
 }
 
 void MainWindow::CreateToolBar() {
