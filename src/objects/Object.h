@@ -35,6 +35,7 @@ public:
     virtual void ClearConnections() {}
 
 	virtual float GetDrillDiameter() const { return 0.0f; }  // 0 = no hole
+	virtual void SetWidth(float width) {}                    // no-op for non-line objects
 
 	virtual void ExportGerber(GerberWriter &w) const {}      // emit RS-274X
 

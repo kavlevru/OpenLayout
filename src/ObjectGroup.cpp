@@ -224,6 +224,12 @@ void ObjectGroup::ResetSoldermask() {
 		object->soldermask = false;
 }
 
+void ObjectGroup::SetSelectedWidth(float width) {
+	for(Object *object = objects; object; object = object->next)
+		if(object->IsSelected())
+			object->SetWidth(width);
+}
+
 void ObjectGroup::ArraySelected(int cols, int rows, const Vec2 &spacing) {
 	if(!IsSelected())
 		return;

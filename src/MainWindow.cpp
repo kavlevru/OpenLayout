@@ -124,8 +124,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(newAct,    &QAction::triggered, this, &MainWindow::NewFile);
     connect(openAct,   &QAction::triggered, this, &MainWindow::OpenFile);
     connect(saveAct,   &QAction::triggered, this, &MainWindow::SaveFile);
-    connect(saveasAct, &QAction::triggered, this, &MainWindow::SaveFileAs);
-    connect(exitAct,   &QAction::triggered, this, &MainWindow::close);
+    connect(saveasAct,   &QAction::triggered, this, &MainWindow::SaveFileAs);
+    connect(boardSaveAct, &QAction::triggered, this, &MainWindow::SaveFileAs);
+    connect(exitAct,     &QAction::triggered, this, &MainWindow::close);
 
     // Edit
     connect(undoAct, &QAction::triggered, this, &MainWindow::Undo);
@@ -617,6 +618,31 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         QMessageBox::about(this, _("About OpenLayout"),
             "OpenLayout\nhttps://github.com/nikita-yfh/OpenLayout");
     });
+
+    // Properties panel: edit the selected objects' line width.
+    propsDock = new QDockWidget(_("Properties"), this);
+    {
+        QWidget *panel = new QWidget(propsDock);
+        QFormLayout *pf = new QFormLayout(panel);
+        QDoubleSpinBox *widthSpin = new QDoubleSpinBox(panel);
+        widthSpin->setRange(0.01, 100.0);
+        widthSpin->setDecimals(3);
+        widthSpin->setValue(0.3);
+        QPushButton *applyWidth = new QPushButton(_("Apply to selection"), panel);
+        pf->addRow(_("Track width (mm):"), widthSpin);
+        pf->addRow(applyWidth);
+        propsDock->setWidget(panel);
+        connect(applyWidth, &QPushButton::clicked, this, [this, widthSpin](){
+            PushUndo();
+            pcb.GetSelectedBoard()->SetSelectedWidth(widthSpin->value());
+            mainCanvas->update();
+        });
+    }
+    addDockWidget(Qt::RightDockWidgetArea, propsDock);
+    propsDock->hide();
+    panelPropertiesAct->setCheckable(true);
+    connect(panelPropertiesAct, &QAction::toggled, propsDock, &QDockWidget::setVisible);
+    connect(propsDock, &QDockWidget::visibilityChanged, panelPropertiesAct, &QAction::setChecked);
 
     // Image export: grab the rendered framebuffer and save it.
     auto exportImage = [this](const char *fmt, const char *filter) {
