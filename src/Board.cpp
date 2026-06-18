@@ -86,8 +86,12 @@ void Board::Load(File &file) {
 
 	uint32_t objectCount = file.Read<uint32_t>();
 	Object *last = nullptr;
-	for(int i = 0; i < objectCount; i++)
-		last = AddObjectEnd(Object::Load(file), last);
+	for(int i = 0; i < objectCount; i++) {
+		Object *object = Object::Load(file);
+		if(!object)
+			break;          // unknown type: stream is misaligned, stop
+		last = AddObjectEnd(object, last);
+	}
 	for(Object *object = objects; object; object = object->GetNext())
 		object->LoadConnections(objects, file);
 

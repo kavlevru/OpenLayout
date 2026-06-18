@@ -26,8 +26,8 @@ void Object::Save(File &file) const{
 }
 
 Object *Object::Load(File &file){
-	Object *object;
 	uint8_t type = file.Read<uint8_t>();
+	Object *object = nullptr;
 	switch(type){
 		case THT_PAD:
 			object = new THTPad();
@@ -41,11 +41,11 @@ Object *Object::Load(File &file){
 		case TRACK:
 			object = new Track();
 			break;
-		case TEXT:
-			break;
 		case SMD_PAD:
 			object = new SMDPad();
 			break;
+		default:                 // unknown / unsupported type (e.g. TEXT)
+			return nullptr;
 	}
 	object->LoadObject(file);
 	return object;
