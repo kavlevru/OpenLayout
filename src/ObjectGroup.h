@@ -52,6 +52,8 @@ public:
 
 	void SetSelectedToLayer(uint8_t layer); // move the selected objects to a layer
 	void ChangeSide(float mirrorX);         // flip to the other board side
+	void ResetSoldermask();                 // clear the soldermask flag on all objects
+	void ArraySelected(int cols, int rows, const Vec2 &spacing); // duplicate in a grid
 	void DeleteSelected();
 	void DeleteOutside(const AABB &keep);   // delete objects lying fully outside keep
 	void RemoveAllConnections();            // drop every pad rubber-band connection

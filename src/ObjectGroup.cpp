@@ -1,6 +1,7 @@
 #include "ObjectGroup.h"
 #include "GLUtils.h"
 #include "THTPad.h"
+#include <vector>
 
 ObjectGroup::ObjectGroup(const ObjectGroup &other) {
 	Object *last = nullptr;
@@ -216,6 +217,32 @@ void ObjectGroup::SetSelectedToLayer(uint8_t layer) {
 	for(Object *object = objects; object; object = object->next)
 		if(object->IsSelected())
 			object->layer = layer;
+}
+
+void ObjectGroup::ResetSoldermask() {
+	for(Object *object = objects; object; object = object->next)
+		object->soldermask = false;
+}
+
+void ObjectGroup::ArraySelected(int cols, int rows, const Vec2 &spacing) {
+	if(!IsSelected())
+		return;
+	std::vector<Object*> sel;
+	for(Object *object = objects; object; object = object->next)
+		if(object->IsSelected())
+			sel.push_back(object);
+	Object *last = GetLast();
+	for(int r = 0; r < rows; r++)
+		for(int c = 0; c < cols; c++) {
+			if(r == 0 && c == 0)
+				continue;
+			Vec2 d(c * spacing.x, r * spacing.y);
+			for(Object *o : sel) {
+				Object *clone = o->Clone();
+				clone->Move(d);
+				last = AddObjectEnd(clone, last);
+			}
+		}
 }
 
 void ObjectGroup::ChangeSide(float mirrorX) {

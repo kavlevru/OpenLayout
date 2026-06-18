@@ -409,8 +409,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(saveMacroAct,     &QAction::triggered, this, saveSelected);
     connect(elementExportAct, &QAction::triggered, this, saveSelected);
 
-    // Import elements / load macro: append objects from such a file.
-    connect(elementImportAct, &QAction::triggered, this, [this](){
+    // Import elements / load macro / place footprint: append objects from such
+    // a file (all three use the same OpenLayout macro format).
+    auto importElements = [this](){
         QString path = QFileDialog::getOpenFileName(this, _("Import elements"), QString(),
                                                     "OpenLayout macro (*.olm);;All files (*)");
         if(path.isEmpty())
@@ -432,6 +433,80 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             b->AddObjectEnd(o);
         }
         mainCanvas->update();
+    };
+    connect(elementImportAct, &QAction::triggered, this, importElements);
+    connect(footprintAct,     &QAction::triggered, this, importElements);
+
+    // Reset solder mask on all objects.
+    connect(resetMaskAct, &QAction::triggered, this,
+            editUndo([](Board *b){ b->ResetSoldermask(); }));
+
+    // List drillings: summarise the through holes by diameter.
+    connect(listDrillingsAct, &QAction::triggered, this, [this](){
+        std::map<int, int> counts;
+        for(Object *o = pcb.GetSelectedBoard()->GetObjects(); o; o = o->GetNext()) {
+            float d = o->GetDrillDiameter();
+            if(d > 0.0f)
+                counts[(int)lround(d * 1000.0f)]++;
+        }
+        QString text;
+        int total = 0;
+        for(const auto &kv : counts) {
+            text += QString("Ø %1 mm: %2\n").arg(kv.first / 1000.0).arg(kv.second);
+            total += kv.second;
+        }
+        if(total == 0)
+            text = _("No through holes on this board.");
+        else
+            text.prepend(QString(_("%1 holes total\n\n")).arg(total));
+        QMessageBox::information(this, _("Drillings"), text);
+    });
+
+    // Massive: duplicate the selection in a rectangular array.
+    connect(massiveAct, &QAction::triggered, this, [this](){
+        if(!pcb.GetSelectedBoard()->IsSelected()) {
+            QMessageBox::information(this, _("Array"), _("Select something first."));
+            return;
+        }
+        QDialog dlg(this);
+        dlg.setWindowTitle(_("Array (massive duplicate)"));
+        QFormLayout *form = new QFormLayout(&dlg);
+        QSpinBox *cols = new QSpinBox(&dlg); cols->setRange(1, 1000); cols->setValue(2);
+        QSpinBox *rows = new QSpinBox(&dlg); rows->setRange(1, 1000); rows->setValue(2);
+        QDoubleSpinBox *dx = new QDoubleSpinBox(&dlg); dx->setRange(-1000, 1000); dx->setDecimals(3); dx->setValue(5.0);
+        QDoubleSpinBox *dy = new QDoubleSpinBox(&dlg); dy->setRange(-1000, 1000); dy->setDecimals(3); dy->setValue(5.0);
+        form->addRow(_("Columns:"), cols);
+        form->addRow(_("Rows:"), rows);
+        form->addRow(_("X spacing (mm):"), dx);
+        form->addRow(_("Y spacing (mm):"), dy);
+        QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        form->addRow(bb);
+        connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        if(dlg.exec() == QDialog::Accepted) {
+            PushUndo();
+            pcb.GetSelectedBoard()->ArraySelected(cols->value(), rows->value(),
+                                                  Vec2(dx->value(), dy->value()));
+            mainCanvas->update();
+        }
+    });
+
+    // Board import: append the boards from another .lay6 file.
+    connect(boardImportAct, &QAction::triggered, this, [this](){
+        QString path = QFileDialog::getOpenFileName(this, _("Import board"), QString(),
+                                                    "Sprint-Layout 6 (*.lay6);;All files (*)");
+        if(path.isEmpty())
+            return;
+        File f(path.toLocal8Bit().constData(), "rb");
+        PCB temp;
+        if(!f.IsOk() || !temp.Load(f)) {
+            QMessageBox::warning(this, _("Import board"), _("Could not open the file."));
+            return;
+        }
+        for(uint32_t i = 0; i < temp.Size(); i++)
+            pcb.AddBoard(temp[i]);            // ownership transfers; temp won't free boards
+        mainCanvas->SetBoard(pcb.GetSelectedBoard());
+        RebuildBoardTabs();
     });
 
     // Bitmap underlay: pick an image to show under the board, set its DPI.
