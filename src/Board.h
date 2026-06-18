@@ -91,7 +91,8 @@ inline const Vec2 &Board::GetSize() const {
 	return size;
 }
 inline void Board::SetName(const char *_name) {
-	strncpy(name, _name, 30);
+	strncpy(name, _name, 29);
+	name[29] = '\0';
 }
 inline uint8_t Board::GetSelectedLayer() const {
 	return activeLayer;

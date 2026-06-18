@@ -426,10 +426,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         uint32_t n = f.Read<uint32_t>();
         for(uint32_t i = 0; i < n; i++) {
             Object *o = Object::Load(f);
-            if(o) {
-                o->Select();
-                b->AddObjectEnd(o);
-            }
+            if(!o)
+                break;        // unknown type or EOF: stop instead of looping
+            o->Select();
+            b->AddObjectEnd(o);
         }
         mainCanvas->update();
     });
