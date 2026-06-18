@@ -242,6 +242,8 @@ void Board::Draw(const Settings &settings, const Vec2 &screenSize) const {
 	glEnable(GL_SCISSOR_TEST);
 	glScissor(-camera.x * zoom, screenSize.y - (size.y - camera.y) * zoom, size.x * zoom, size.y * zoom);
 
+	images.Draw();
+
 	if(GetCurrentLayerGround()) {
 		colors.SetColor(COLOR_BGR);
 		DrawGroundDistance(activeLayer);

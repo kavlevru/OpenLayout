@@ -434,6 +434,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         mainCanvas->update();
     });
 
+    // Bitmap underlay: pick an image to show under the board, set its DPI.
+    connect(bitmapAct, &QAction::triggered, this, [this](){
+        ImageConfig &ic = pcb.GetSelectedBoard()->images.Get(0);
+        QString path = QFileDialog::getOpenFileName(this, _("Bitmap underlay"),
+                            QString::fromLocal8Bit(ic.path),
+                            "Images (*.png *.jpg *.jpeg *.bmp *.gif);;All files (*)");
+        if(path.isEmpty())
+            return;
+        bool ok = false;
+        int dpi = QInputDialog::getInt(this, _("Bitmap underlay"), _("Image resolution (DPI):"),
+                                       ic.dpi ? ic.dpi : 600, 1, 10000, 1, &ok);
+        if(!ok)
+            return;
+        strncpy(ic.path, path.toLocal8Bit().constData(), 199);
+        ic.path[199] = '\0';
+        ic.dpi = dpi;
+        ic.enabled = 1;
+        ic.Reload();
+        mainCanvas->update();
+    });
+
     // Printing: render the current canvas view to a printer or PDF.
     connect(printSetupAct, &QAction::triggered, this, [this](){
         if(!printer)
