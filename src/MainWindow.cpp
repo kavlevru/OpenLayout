@@ -644,6 +644,58 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(panelPropertiesAct, &QAction::toggled, propsDock, &QDockWidget::setVisible);
     connect(propsDock, &QDockWidget::visibilityChanged, panelPropertiesAct, &QAction::setChecked);
 
+    // Selector panel: list the objects on the board and select one on click.
+    selectorDock = new QDockWidget(_("Selector"), this);
+    {
+        QWidget *panel = new QWidget(selectorDock);
+        QVBoxLayout *sl = new QVBoxLayout(panel);
+        QPushButton *refresh = new QPushButton(_("Refresh"), panel);
+        selectorList = new QListWidget(panel);
+        sl->addWidget(refresh);
+        sl->addWidget(selectorList);
+        selectorDock->setWidget(panel);
+
+        auto refreshSelector = [this](){
+            selectorList->clear();
+            selectorItems.clear();
+            int i = 0;
+            for(Object *o = pcb.GetSelectedBoard()->GetObjects(); o; o = o->GetNext()) {
+                const char *t;
+                switch(o->GetType()) {
+                    case Object::THT_PAD: t = "THT pad"; break;
+                    case Object::SMD_PAD: t = "SMD pad"; break;
+                    case Object::TRACK:   t = "Track";   break;
+                    case Object::POLY:    t = "Polygon"; break;
+                    case Object::CIRCLE:  t = "Circle";  break;
+                    default:              t = "Object";  break;
+                }
+                selectorList->addItem(QString("%1 %2").arg(t).arg(++i));
+                selectorItems.push_back(o);
+            }
+        };
+        connect(refresh, &QPushButton::clicked, this, refreshSelector);
+        connect(selectorList, &QListWidget::currentRowChanged, this, [this](int row){
+            if(row < 0 || row >= (int)selectorItems.size())
+                return;
+            Object *target = selectorItems[row];
+            Board *b = pcb.GetSelectedBoard();
+            for(Object *o = b->GetObjects(); o; o = o->GetNext())
+                if(o == target) {                 // still on the board
+                    b->UnselectAll();
+                    target->Select();
+                    mainCanvas->update();
+                    return;
+                }
+        });
+        connect(selectorDock, &QDockWidget::visibilityChanged, this,
+                [refreshSelector](bool vis){ if(vis) refreshSelector(); });
+    }
+    addDockWidget(Qt::RightDockWidgetArea, selectorDock);
+    selectorDock->hide();
+    panelSelectorAct->setCheckable(true);
+    connect(panelSelectorAct, &QAction::toggled, selectorDock, &QDockWidget::setVisible);
+    connect(selectorDock, &QDockWidget::visibilityChanged, panelSelectorAct, &QAction::setChecked);
+
     // Image export: grab the rendered framebuffer and save it.
     auto exportImage = [this](const char *fmt, const char *filter) {
         return [this, fmt, filter]() {

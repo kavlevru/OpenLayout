@@ -51,6 +51,10 @@ private:
     bool updatingLayers = false;
 
     QPrinter *printer = nullptr;
+    QDockWidget *propsDock = nullptr;
+    QDockWidget *selectorDock = nullptr;
+    QListWidget *selectorList = nullptr;
+    std::vector<Object*> selectorItems;
 
     Settings settings;
 
