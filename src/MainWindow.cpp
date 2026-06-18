@@ -103,6 +103,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     connect(toolPanel, SIGNAL(ToolChanged()), mainCanvas, SLOT(FinishCreating()));
     connect(mainCanvas, SIGNAL(ToolChanged(int)), toolPanel, SLOT(OnToolChanged(int)));
+    connect(mainCanvas, &MainCanvas::BeforeChange, this, &MainWindow::PushUndo);
 
     // Helper: run an operation on the active board, then refresh the canvas.
     auto edit = [this](auto op) {

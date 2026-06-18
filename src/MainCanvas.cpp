@@ -48,8 +48,9 @@ void MainCanvas::resizeGL(int w, int h) {
 }
 
 void MainCanvas::FinishCreating() {
-	if(placedPointCount >= 3 || (placedPointCount == 2 && settings.selectedTool == TOOL_TRACK)) {
-		((PolygonBase*) board->GetFirstPlaced())->points.Resize(placedPointCount);
+	Object *placed = board->GetFirstPlaced();
+	if(placed && (placedPointCount >= 3 || (placedPointCount == 2 && settings.selectedTool == TOOL_TRACK))) {
+		((PolygonBase*) placed)->points.Resize(placedPointCount);
 		board->UnselectAll();
 	} else
 		board->CancelPlacing();
@@ -152,6 +153,7 @@ void MainCanvas::OnLeftDownEvent(QMouseEvent *event) {
 			if(object) {
 				mousePosition = lastPlacedPoint = object->GetNearestPoint(mouse);
 				mouseDelta = mouse - mousePosition;
+				dragStarted = true;       // arm undo snapshot for a potential move
 			} else {
 				// Empty space: begin a rubber-band selection.
 				selecting = true;
@@ -183,6 +185,7 @@ void MainCanvas::OnLeftUpEvent(QMouseEvent *event) {
 			board->CancelPlacing();
 		board->UnselectAll();
 	} else if(settings.selectedTool == TOOL_EDIT) {
+		dragStarted = false;
 		if(selecting) {
 			selecting = false;
 			board->SelectInRect(AABB(Vec2::Min(selectStart, selectEnd),
@@ -199,6 +202,10 @@ void MainCanvas::OnMouseMotionEvent(QMouseEvent *event) {
 		if(selecting) {
 			selectEnd = mouse;
 		} else if(board->IsSelected()) {
+			if(dragStarted) {          // snapshot once, before the drag moves anything
+				emit BeforeChange();
+				dragStarted = false;
+			}
 			Vec2 _mouse = board->ToActiveGrid(mouse - mouseDelta, lastPlacedPoint);
 			Vec2 delta = _mouse - mousePosition;
 			mousePosition = _mouse;
@@ -235,8 +242,10 @@ void MainCanvas::OnMouseMotionEvent(QMouseEvent *event) {
 			creating = new Poly(board->GetSelectedLayer(), settings.groundDistance, settings.trackSize, &mousePosition, 1, true);
 		else if(settings.selectedTool == TOOL_CIRCLE)
 			creating = new Circle(board->GetSelectedLayer(), settings.groundDistance, settings.trackSize, mousePosition, 0.0f, 0.0f, 0.0f);
-		if(creating)
+		if(creating) {
+			emit BeforeChange();      // snapshot for undo before adding the object
 			PlaceObject(creating);
+		}
     } else
 		mousePosition = mouse;
 

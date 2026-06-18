@@ -20,7 +20,18 @@ public:
     void PlaceObject(Object *object);
     void PlaceObjectGroup(const ObjectGroup &objects);
 
-    void SetBoard(Board *_board) { board = _board; update(); }
+    void SetBoard(Board *_board) {
+        board = _board;
+        // Reset interaction state so it can't dangle against the new board.
+        placedPointCount = 0;
+        lastPlacedPoint = Vec2::Invalid();
+        mousePosition = Vec2::Invalid();
+        selecting = false;
+        dragStarted = false;
+        firstConnectionPad = secondConnectionPad = nullptr;
+        firstConnectionPointSelected = false;
+        update();
+    }
 
     void Copy();
     void Cut();
@@ -31,6 +42,7 @@ public slots:
     void FinishCreating();
 signals:
     void ToolChanged(int tool);
+    void BeforeChange();        // emitted before an interactive edit (for undo)
 
 protected:
     void initializeGL() override;
@@ -66,6 +78,7 @@ private:
     void DrawSelectionRect() const;
 
     bool selecting = false;
+    bool dragStarted = false;
     Vec2 selectStart;
     Vec2 selectEnd;
     Vec2 currentSize;
