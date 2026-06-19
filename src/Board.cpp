@@ -236,6 +236,32 @@ void Board::Draw(const Settings &settings, const Vec2 &screenSize) const {
 	const ColorScheme &colors = settings.GetColorScheme();
 	glMatrixMode(GL_PROJECTION);
 
+	if(settings.selectedTool == TOOL_PHOTOVIEW) {
+		// Photo-realistic preview: dark surround, FR4 substrate, opaque copper /
+		// silk / outline, holes in dark. No grid, ground planes or selection.
+		glClearColor(0.13f, 0.13f, 0.13f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glViewport(0, 0, screenSize.x, screenSize.y);
+		glLoadIdentity();
+		glOrtho(0.0f, screenSize.x / zoom, screenSize.y / zoom, 0.0f, 0.0f, 1.0f);
+		glutils::Translate(-camera);
+
+		glColor3ub(12, 105, 55);                  // FR4 substrate
+		glRectf(0.0f, 0.0f, size.x, size.y);
+
+		glEnable(GL_SCISSOR_TEST);
+		glScissor(-camera.x * zoom, screenSize.y - (size.y - camera.y) * zoom, size.x * zoom, size.y * zoom);
+
+		images.Draw();
+		DrawObjectsPhoto(activeLayer, layerVisible);
+
+		glColor3ub(10, 10, 10);                   // drill holes
+		DrawDrillings(layerVisible);
+
+		glDisable(GL_SCISSOR_TEST);
+		return;
+	}
+
 	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 

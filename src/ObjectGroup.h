@@ -61,6 +61,7 @@ public:
 	void CancelPlacing();
 
 	void DrawObjects(const ColorScheme &colors, uint8_t activeLayer, bool selected, const bool *layerVisible = nullptr) const;
+	void DrawObjectsPhoto(uint8_t activeLayer, const bool *layerVisible = nullptr) const;   // opaque, photo-realistic
 	void DrawGroundDistance(uint8_t activeLayer) const;
 	void DrawDrillings(const bool *layerVisible = nullptr) const;
 

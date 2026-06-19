@@ -460,6 +460,39 @@ void ObjectGroup::DrawObjects(const ColorScheme &colors, uint8_t activeLayer, bo
 			object->DrawObject();
 }
 
+void ObjectGroup::DrawObjectsPhoto(uint8_t activeLayer, const bool *layerVisible) const {
+	// Same back-to-front layer ordering as DrawObjects, but with opaque
+	// photo-realistic colours: copper as gold, silkscreen white, outline dark.
+	const uint8_t layers[4][7] = {
+		{LAYER_I1, LAYER_I2, LAYER_C2, LAYER_C1, LAYER_S2, LAYER_S1, LAYER_O},
+		{LAYER_C1, LAYER_C2, LAYER_I2, LAYER_I1, LAYER_S1, LAYER_S2, LAYER_O},
+		{LAYER_C1, LAYER_C2, LAYER_I1, LAYER_I2, LAYER_S1, LAYER_S2, LAYER_O},
+		{LAYER_I1, LAYER_I2, LAYER_C1, LAYER_C2, LAYER_S1, LAYER_S2, LAYER_O}
+	};
+	int row = 3;
+	if(activeLayer == LAYER_C1 || activeLayer == LAYER_S1) row = 0;
+	else if(activeLayer == LAYER_I1) row = 1;
+	else if(activeLayer == LAYER_I2) row = 2;
+
+	for(int i = 0; i < 7; i++) {
+		uint8_t layer = layers[row][i];
+		if(layer == LAYER_S1 || layer == LAYER_S2)
+			glColor3ub(235, 235, 235);          // silkscreen
+		else if(layer == LAYER_O)
+			glColor3ub(20, 20, 20);             // outline
+		else
+			glColor3ub(212, 170, 75);           // copper
+		for(const Object *object = objects; object; object = object->GetNext())
+			if(object->GetLayer() == layer && (!layerVisible || layerVisible[object->GetLayer()]) &&
+					!(object->GetType() == Object::THT_PAD && ((THTPad*) object)->HasMetallization()))
+				object->DrawObject();
+	}
+	glColor3ub(212, 170, 75);
+	for(const Object *object = objects; object; object = object->GetNext())
+		if(object->GetType() == Object::THT_PAD && ((THTPad*) object)->HasMetallization())
+			object->DrawObject();
+}
+
 void ObjectGroup::DrawGroundDistance(uint8_t activeLayer) const {
 	for(const Object *object = objects; object; object = object->GetNext())
 		if(object->GetLayer() == activeLayer)
