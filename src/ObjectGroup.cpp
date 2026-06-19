@@ -262,6 +262,8 @@ static void shapeOf(const Object *o, std::vector<Vec2> &pts, float &halfWidth) {
 		const PolygonBase *p = (const PolygonBase*) o;
 		for(uint32_t i = 0; i < p->points.Size(); i++)
 			pts.push_back(p->points[i]);
+		if(o->GetType() == Object::POLY && pts.size() > 1)
+			pts.push_back(pts[0]);          // close the zone outline
 		halfWidth = ((const LineObject*) o)->GetWidth() / 2.0f;
 		if(pts.empty())
 			pts.push_back(o->GetPosition());
