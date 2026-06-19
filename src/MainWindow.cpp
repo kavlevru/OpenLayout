@@ -166,6 +166,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         }
     });
 
+    // The Autoroute tool runs the maze router once over the board's rubber-band
+    // connections, then drops back to Edit.
+    connect(toolPanel, &ToolPanel::ToolChanged, this, [this]{
+        if(settings.selectedTool != TOOL_AUTOROUTE)
+            return;
+        PushUndo();
+        std::pair<int, int> r = pcb.GetSelectedBoard()->Autoroute(settings);
+        mainCanvas->update();
+        statusBar()->showMessage(QString(_("Autorouted %1 of %2 connections"))
+            .arg(r.first).arg(r.second));
+        toolPanel->OnToolChanged(TOOL_EDIT);
+    });
+
     // Helper: run an operation on the active board, then refresh the canvas.
     auto edit = [this](auto op) {
         return [this, op]() { op(pcb.GetSelectedBoard()); mainCanvas->update(); };

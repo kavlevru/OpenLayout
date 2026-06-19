@@ -7,6 +7,7 @@
 #include "Settings.h"
 #include "File.h"
 #include <vector>
+#include <utility>
 
 class Board : public ObjectGroup {
 public:
@@ -44,6 +45,10 @@ public:
 
 	Object *TestPoint(const Vec2 &point);
 	inline Pad *TestPointPad(const Vec2 &point);
+
+	// Single-layer maze (Lee) autorouter for pad rubber-band connections.
+	// Returns {routed, total}; routed connections become tracks and are dropped.
+	std::pair<int, int> Autoroute(const Settings &settings);
 
 	double GetGrid() const;
 	void SetGrid(double grid);

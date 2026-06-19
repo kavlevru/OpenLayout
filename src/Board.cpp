@@ -386,3 +386,168 @@ void Board::DrawSelected() const {
 			object->DrawObject();
 }
 
+// --- Autorouter -------------------------------------------------------------
+//
+// A basic single-layer Lee (maze) router. It rasterises existing copper on the
+// route layer into an obstacle grid (dilated by one cell for clearance), then
+// BFS-routes each pad rubber-band connection on a Manhattan grid, dropping the
+// connection and adding a track when it succeeds. It does not rip up, reorder
+// nets or use multiple layers, so on dense boards many nets will be left for
+// manual routing.
+
+static bool autorouteLayerCopper(uint8_t l) {
+	return l == ObjectGroup::LAYER_C1 || l == ObjectGroup::LAYER_C2 ||
+	       l == ObjectGroup::LAYER_I1 || l == ObjectGroup::LAYER_I2;
+}
+
+static bool autorouteBlocks(const Object *o, uint8_t layer) {
+	if(o->GetType() == Object::THT_PAD && ((const THTPad*) o)->HasMetallization())
+		return autorouteLayerCopper(layer);
+	return o->GetLayer() == layer && autorouteLayerCopper(o->GetLayer());
+}
+
+std::pair<int, int> Board::Autoroute(const Settings &settings) {
+	uint8_t layer = IsSelectedLayerCopper() ? GetSelectedLayer() : (uint8_t) LAYER_C1;
+	float clearance = settings.groundDistance;
+	float tw = settings.trackSize;
+	float pitch = tw + 2.0f * clearance;
+	if(pitch < 0.1f)
+		pitch = 0.1f;
+
+	int cols = (int)(size.x / pitch) + 1;
+	int rows = (int)(size.y / pitch) + 1;
+	if(cols < 2 || rows < 2)
+		return {0, 0};
+
+	auto idx    = [&](int c, int r) { return r * cols + c; };
+	auto center = [&](int c, int r) { return Vec2((c + 0.5f) * pitch, (r + 0.5f) * pitch); };
+	auto clampC = [&](int c) { return c < 0 ? 0 : (c >= cols ? cols - 1 : c); };
+	auto clampR = [&](int r) { return r < 0 ? 0 : (r >= rows ? rows - 1 : r); };
+
+	// Base obstacle grid from existing copper on the route layer.
+	std::vector<char> base(cols * rows, 0);
+	for(Object *o = objects; o; o = o->GetNext()) {
+		if(!autorouteBlocks(o, layer))
+			continue;
+		AABB box = o->GetAABB();
+		int c0 = clampC((int)(box.lower.x / pitch) - 1), c1 = clampC((int)(box.upper.x / pitch) + 1);
+		int r0 = clampR((int)(box.lower.y / pitch) - 1), r1 = clampR((int)(box.upper.y / pitch) + 1);
+		for(int r = r0; r <= r1; r++)
+			for(int c = c0; c <= c1; c++)
+				if(o->TestPoint(center(c, r)))
+					base[idx(c, r)] = 1;
+	}
+	// Dilate by one cell so routed tracks keep clearance from obstacles.
+	std::vector<char> obst(cols * rows, 0);
+	for(int r = 0; r < rows; r++)
+		for(int c = 0; c < cols; c++)
+			if(base[idx(c, r)])
+				for(int dr = -1; dr <= 1; dr++)
+					for(int dc = -1; dc <= 1; dc++)
+						obst[idx(clampC(c + dc), clampR(r + dr))] = 1;
+
+	// Collect unique connection pairs.
+	std::vector<std::pair<Pad*, Pad*>> pairs;
+	for(Object *o = objects; o; o = o->GetNext()) {
+		if(!o->IsPad())
+			continue;
+		Pad *p = (Pad*) o;
+		for(uint32_t i = 0; i < p->ConnectionCount(); i++) {
+			Pad *q = p->GetConnection(i);
+			if(p < q)
+				pairs.push_back({p, q});
+		}
+	}
+
+	int routed = 0, total = pairs.size();
+	std::vector<int> prev(cols * rows);
+	std::vector<char> seen(cols * rows);
+
+	for(auto &pr : pairs) {
+		Pad *a = pr.first, *b = pr.second;
+
+		// Working grid: free the footprints of the two endpoint pads.
+		std::vector<char> work = obst;
+		for(Pad *pad : {a, b}) {
+			AABB box = pad->GetAABB();
+			int c0 = clampC((int)(box.lower.x / pitch) - 1), c1 = clampC((int)(box.upper.x / pitch) + 1);
+			int r0 = clampR((int)(box.lower.y / pitch) - 1), r1 = clampR((int)(box.upper.y / pitch) + 1);
+			for(int r = r0; r <= r1; r++)
+				for(int c = c0; c <= c1; c++)
+					if(pad->TestPoint(center(c, r)))
+						work[idx(c, r)] = 0;
+		}
+
+		int sc = clampC((int)(a->GetPosition().x / pitch)), sr = clampR((int)(a->GetPosition().y / pitch));
+		int gc = clampC((int)(b->GetPosition().x / pitch)), gr = clampR((int)(b->GetPosition().y / pitch));
+		work[idx(sc, sr)] = 0;
+		work[idx(gc, gr)] = 0;
+
+		// BFS.
+		std::fill(seen.begin(), seen.end(), 0);
+		std::vector<int> queue;
+		queue.push_back(idx(sc, sr));
+		seen[idx(sc, sr)] = 1;
+		prev[idx(sc, sr)] = -1;
+		size_t head = 0;
+		bool found = false;
+		const int dc[4] = {1, -1, 0, 0}, dr[4] = {0, 0, 1, -1};
+		while(head < queue.size()) {
+			int cur = queue[head++];
+			if(cur == idx(gc, gr)) { found = true; break; }
+			int cc = cur % cols, cr = cur / cols;
+			for(int k = 0; k < 4; k++) {
+				int nc = cc + dc[k], nr = cr + dr[k];
+				if(nc < 0 || nc >= cols || nr < 0 || nr >= rows)
+					continue;
+				int ni = idx(nc, nr);
+				if(seen[ni] || work[ni])
+					continue;
+				seen[ni] = 1;
+				prev[ni] = cur;
+				queue.push_back(ni);
+			}
+		}
+		if(!found)
+			continue;
+
+		// Backtrace into a cell path (goal -> start), then build the polyline.
+		std::vector<int> cells;
+		for(int cur = idx(gc, gr); cur != -1; cur = prev[cur])
+			cells.push_back(cur);
+		std::vector<Vec2> pts;
+		pts.push_back(a->GetPosition());
+		for(int i = (int)cells.size() - 1; i >= 0; i--)
+			pts.push_back(center(cells[i] % cols, cells[i] / cols));
+		pts.push_back(b->GetPosition());
+
+		// Drop collinear/duplicate intermediate points.
+		std::vector<Vec2> simple;
+		for(const Vec2 &p : pts) {
+			if(simple.size() >= 2) {
+				Vec2 &x = simple[simple.size() - 2], &y = simple[simple.size() - 1];
+				if(std::abs(utils::Orientation(x, y, p)) < 1e-4f)
+					simple.pop_back();
+			}
+			if(simple.empty() || (simple.back() - p).LengthSq() > 1e-6f)
+				simple.push_back(p);
+		}
+		if(simple.size() < 2)
+			continue;
+
+		AddObjectEnd(new Track(layer, clearance, tw, simple.data(), simple.size()));
+
+		// Mark the routed cells (dilated) as obstacles for later nets.
+		for(int cell : cells) {
+			int cc = cell % cols, cr = cell / cols;
+			for(int ddr = -1; ddr <= 1; ddr++)
+				for(int ddc = -1; ddc <= 1; ddc++)
+					obst[idx(clampC(cc + ddc), clampR(cr + ddr))] = 1;
+		}
+
+		a->RemoveConnections(b);   // rip the rubber-band; removes both directions
+		routed++;
+	}
+	return {routed, total};
+}
+
