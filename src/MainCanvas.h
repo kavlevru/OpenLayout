@@ -43,6 +43,7 @@ public slots:
 signals:
     void ToolChanged(int tool);
     void BeforeChange();        // emitted before an interactive edit (for undo)
+    void Measured(const QString &text);   // measure-tool readout for the status bar
 
 protected:
     void initializeGL() override;
@@ -76,9 +77,14 @@ private:
     void BuildRect();
     void BuildCircle();
     void DrawSelectionRect() const;
+    void DrawMeasure() const;
+    void EmitMeasure();
 
     bool selecting = false;
     bool dragStarted = false;
+    bool measuring = false;
+    Vec2 measureStart;
+    Vec2 measureEnd;
     Vec2 selectStart;
     Vec2 selectEnd;
     Vec2 currentSize;

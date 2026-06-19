@@ -27,6 +27,36 @@ void MainCanvas::paintGL() {
     board->Draw(settings, currentSize);
     if(selecting)
         DrawSelectionRect();
+    if(settings.selectedTool == TOOL_MEASURE && measuring)
+        DrawMeasure();
+}
+
+void MainCanvas::DrawMeasure() const {
+    // Board::Draw leaves the camera/zoom projection set, so we draw in mm.
+    glColor3f(0.0f, 0.45f, 0.85f);
+    glLineWidth(1.0f);
+    glBegin(GL_LINES);
+    glutils::Vertex(measureStart);
+    glutils::Vertex(measureEnd);
+    glEnd();
+    glPointSize(5.0f);
+    glBegin(GL_POINTS);
+    glutils::Vertex(measureStart);
+    glutils::Vertex(measureEnd);
+    glEnd();
+}
+
+void MainCanvas::EmitMeasure() {
+    Vec2 d = measureEnd - measureStart;
+    // Board Y grows downward; negate it so the reported angle is mathematical.
+    float angle = atan2f(-d.y, d.x) * 180.0f / M_PI;
+    emit Measured(QString("%1: %2 mm    dx: %3    dy: %4    %5: %6°")
+        .arg(QString::fromUtf8("Δ"))
+        .arg(d.Length(), 0, 'f', 3)
+        .arg(d.x, 0, 'f', 3)
+        .arg(-d.y, 0, 'f', 3)
+        .arg(QString::fromUtf8("∠"))
+        .arg(angle, 0, 'f', 1));
 }
 
 void MainCanvas::DrawSelectionRect() const {
@@ -136,6 +166,10 @@ void MainCanvas::OnLeftDownEvent(QMouseEvent *event) {
             if(firstConnectionPad)
                 firstConnectionPointSelected = true;
         }
+    } else if(settings.selectedTool == TOOL_MEASURE) {
+        measuring = true;
+        measureStart = measureEnd = board->ToActiveGrid(mouse);
+        EmitMeasure();
     } else {
 		if(board->GetFirstPlaced()) {
 			if(!board->GetFirstPlaced()->groups.Empty())
@@ -171,6 +205,10 @@ void MainCanvas::OnMiddleDownEvent(QMouseEvent *event) {
 void MainCanvas::OnRightDownEvent(QMouseEvent *event) {
 	if(settings.selectedTool == TOOL_ZOOM || settings.selectedTool == TOOL_PHOTOVIEW)
 		board->Zoom(1.0f / zoomRatioButtons, event->pos());
+	else if(settings.selectedTool == TOOL_MEASURE) {
+		measuring = false;
+		emit Measured(QString());
+	}
 	else if(settings.selectedTool != TOOL_EDIT) {
 		if(placedPointCount == 0)
             emit ToolChanged(TOOL_EDIT);
@@ -198,6 +236,10 @@ void MainCanvas::OnLeftUpEvent(QMouseEvent *event) {
 
 void MainCanvas::OnMouseMotionEvent(QMouseEvent *event) {
     Vec2 mouse(board->ConvertToCoords(event->pos()));
+	if(settings.selectedTool == TOOL_MEASURE && (event->buttons() & Qt::LeftButton)) {
+		measureEnd = board->ToActiveGrid(mouse);
+		EmitMeasure();
+	}
 	if(settings.selectedTool == TOOL_EDIT && (event->buttons() & Qt::LeftButton)) {
 		if(selecting) {
 			selectEnd = mouse;

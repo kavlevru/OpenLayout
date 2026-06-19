@@ -107,6 +107,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(mainCanvas, SIGNAL(ToolChanged(int)), toolPanel, SLOT(OnToolChanged(int)));
     connect(mainCanvas, &MainCanvas::BeforeChange, this, &MainWindow::PushUndo);
 
+    statusBar()->showMessage(_("Ready"));
+    connect(mainCanvas, &MainCanvas::Measured, this, [this](const QString &text){
+        if(text.isEmpty())
+            statusBar()->clearMessage();
+        else
+            statusBar()->showMessage(text);
+    });
+
     // The Special-form tool opens a generator dialog; on OK its objects become a
     // group that follows the cursor until clicked (a left click on the canvas
     // drops it and reverts to Edit). Cancel just returns to Edit.
