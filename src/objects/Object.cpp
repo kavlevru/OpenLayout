@@ -4,6 +4,7 @@
 #include "Track.h"
 #include "Poly.h"
 #include "Circle.h"
+#include "Text.h"
 
 Vec2 Object::GetNearestPoint(const Vec2 &point) const {
 	return GetPosition();
@@ -44,7 +45,10 @@ Object *Object::Load(File &file){
 		case SMD_PAD:
 			object = new SMDPad();
 			break;
-		default:                 // unknown / unsupported type (e.g. TEXT)
+		case TEXT:
+			object = new Text();
+			break;
+		default:                 // unknown / unsupported type
 			return nullptr;
 	}
 	object->LoadObject(file);

@@ -34,6 +34,7 @@ set(SOURCES
     src/objects/Poly.cpp
     src/objects/PolygonBase.cpp
     src/objects/SMDPad.cpp
+    src/objects/Text.cpp
     src/objects/THTPad.cpp
     src/objects/Track.cpp
 
@@ -76,6 +77,7 @@ set(HEADERS
     src/objects/PolygonBase.h
     src/objects/Poly.h
     src/objects/SMDPad.h
+    src/objects/Text.h
     src/objects/THTPad.h
     src/objects/Track.h
     src/tools/ConnectionsTool.h

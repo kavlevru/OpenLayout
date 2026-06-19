@@ -3,6 +3,7 @@
 
 #include "SettingsDialog.h"
 #include "FormDialog.h"
+#include "Text.h"
 #include "Gerber.h"
 #include "Track.h"
 #include "Poly.h"
@@ -118,6 +119,43 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
             mainCanvas->PlaceObjectGroup(dlg.GetObjects());
         else
             toolPanel->OnToolChanged(TOOL_EDIT);
+    });
+
+    // The Text tool asks for the string and its size, then places a single Text
+    // object that follows the cursor until clicked (same flow as Special form).
+    connect(toolPanel, &ToolPanel::ToolChanged, this, [this]{
+        if(settings.selectedTool != TOOL_TEXT)
+            return;
+        QDialog dlg(this);
+        dlg.setWindowTitle(_("Text"));
+        QLineEdit *edit = new QLineEdit(&dlg);
+        QDoubleSpinBox *height = new QDoubleSpinBox(&dlg);
+        height->setRange(0.1, 999.0); height->setSingleStep(0.5); height->setValue(2.0);
+        QDoubleSpinBox *lineWidth = new QDoubleSpinBox(&dlg);
+        lineWidth->setRange(0.01, 99.0); lineWidth->setSingleStep(0.05);
+        lineWidth->setValue(settings.trackSize);
+        QCheckBox *mirror = new QCheckBox(_("Mirror (other side)"), &dlg);
+        QDialogButtonBox *bb =
+            new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        QFormLayout *form = new QFormLayout(&dlg);
+        form->addRow(_("Text:"),            edit);
+        form->addRow(_("Height (mm):"),     height);
+        form->addRow(_("Line width (mm):"), lineWidth);
+        form->addRow(QString(), mirror);
+        form->addRow(bb);
+
+        if(dlg.exec() == QDialog::Accepted && !edit->text().isEmpty()) {
+            Board *b = pcb.GetSelectedBoard();
+            ObjectGroup group;
+            group.AddObjectEnd(new Text(b->GetSelectedLayer(), settings.groundDistance,
+                lineWidth->value(), Vec2(0.0f, 0.0f), height->value(),
+                edit->text().toLocal8Bit().constData(), mirror->isChecked()));
+            mainCanvas->PlaceObjectGroup(group);
+        } else {
+            toolPanel->OnToolChanged(TOOL_EDIT);
+        }
     });
 
     // Helper: run an operation on the active board, then refresh the canvas.
