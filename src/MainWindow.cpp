@@ -204,6 +204,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(zoomBoardAct,     &QAction::triggered, this, zoom(&Board::ZoomBoard));
     connect(zoomObjectsAct,   &QAction::triggered, this, zoom(&Board::ZoomObjects));
     connect(zoomSelectionAct, &QAction::triggered, this, zoom(&Board::ZoomSelection));
+    connect(zoomPreviousAct,  &QAction::triggered, this, [this](){
+        pcb.GetSelectedBoard()->ZoomPrevious();
+        mainCanvas->update();
+    });
 
     // View
     transparentAct->setCheckable(true);

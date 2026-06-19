@@ -162,7 +162,21 @@ void Board::UpdateCamera(const Vec2 &delta) {
 	camera -= delta;
 }
 
+void Board::SaveView() {
+	viewHistory.push_back({camera, zoom});
+	if(viewHistory.size() > 64)
+		viewHistory.erase(viewHistory.begin());
+}
+void Board::ZoomPrevious() {
+	if(viewHistory.empty())
+		return;
+	View v = viewHistory.back();
+	viewHistory.pop_back();
+	camera = v.camera;
+	zoom = v.zoom;
+}
 void Board::Zoom(float ratio, const Vec2 &mouse) {
+	SaveView();
 	// pos = mouse / zoom + camera
 	// pos1 = pos2
 	// mouse / zoom1 + camera1 = mouse / zoom2 + camera2
@@ -176,6 +190,7 @@ void Board::Zoom(float ratio, const Vec2 &mouse) {
 }
 
 void Board::ZoomAABB(const Vec2 &screenSize, const AABB &aabb) {
+	SaveView();
 	Vec2 size = aabb.Size();
 	camera = aabb.lower;
 	if(screenSize.x / screenSize.y > size.x / size.y) {

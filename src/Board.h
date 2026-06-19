@@ -6,6 +6,7 @@
 #include "ImageConfig.h"
 #include "Settings.h"
 #include "File.h"
+#include <vector>
 
 class Board : public ObjectGroup {
 public:
@@ -53,6 +54,7 @@ public:
 	void ZoomBoard(const Vec2 &screenSize);
 	void ZoomObjects(const Vec2 &screenSize);
 	void ZoomSelection(const Vec2 &screenSize);
+	void ZoomPrevious();   // restore the view from before the last zoom
 
 	void Draw(const Settings &settings, const Vec2 &screenSize) const;
 	void DrawGrid(const Settings &settings, const Vec2 &screenSize) const;
@@ -70,6 +72,10 @@ public:
 
 private:
 	void ZoomAABB(const Vec2 &screenSize, const AABB &aabb);
+	void SaveView();   // push the current view onto the zoom history
+
+	struct View { Vec2 camera; double zoom; };
+	std::vector<View> viewHistory;
 
 	char name[30];
 	Vec2 size;
