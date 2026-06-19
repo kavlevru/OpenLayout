@@ -413,6 +413,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                 written++;
             }
         }
+        // Solder-mask layers: openings over every pad on the side (through-pads
+        // open on both), plus any copper object explicitly flagged into the mask.
+        GerberWriter maskTop(h), maskBot(h);
+        bool anyTop = false, anyBot = false;
+        for(Object *o = b->GetObjects(); o; o = o->GetNext()) {
+            if(o->GetType() == Object::THT_PAD) {
+                o->ExportGerber(maskTop); anyTop = true;
+                o->ExportGerber(maskBot); anyBot = true;
+            } else if(o->GetType() == Object::SMD_PAD || o->HasSoldermask()) {
+                if(o->GetLayer() == ObjectGroup::LAYER_C1) { o->ExportGerber(maskTop); anyTop = true; }
+                else if(o->GetLayer() == ObjectGroup::LAYER_C2) { o->ExportGerber(maskBot); anyBot = true; }
+            }
+        }
+        if(anyTop) {
+            std::ofstream out(QString("%1.MASKTOP.gbr").arg(base).toLocal8Bit().constData());
+            if(out) { maskTop.write(out); written++; }
+        }
+        if(anyBot) {
+            std::ofstream out(QString("%1.MASKBOT.gbr").arg(base).toLocal8Bit().constData());
+            if(out) { maskBot.write(out); written++; }
+        }
         QMessageBox::information(this, _("Export Gerber"),
                                  QString(_("Exported %1 layer file(s).")).arg(written));
     });

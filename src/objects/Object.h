@@ -61,6 +61,8 @@ public:
 	void SetGroundDistance(float distance);
 	float GetGroundDistance() const;
 
+	bool HasSoldermask() const { return soldermask; }   // flagged into the solder mask
+
 	bool IsPlaced() const;
 	bool IsSelected() const;
 	void SetPlaced();
