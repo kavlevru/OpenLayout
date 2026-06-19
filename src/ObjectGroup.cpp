@@ -224,6 +224,18 @@ void ObjectGroup::ResetSoldermask() {
 		object->soldermask = false;
 }
 
+void ObjectGroup::ToggleSoldermask(Object *object) {
+	object->soldermask = !object->soldermask;
+}
+
+void ObjectGroup::DrawSoldermaskMarked() const {
+	// Translucent green coating over the objects flagged for the solder mask.
+	glColor4ub(0, 200, 90, 130);
+	for(const Object *object = objects; object; object = object->GetNext())
+		if(object->soldermask)
+			object->DrawObject();
+}
+
 void ObjectGroup::SetSelectedWidth(float width) {
 	for(Object *object = objects; object; object = object->next)
 		if(object->IsSelected())

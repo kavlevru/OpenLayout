@@ -309,6 +309,13 @@ void Board::Draw(const Settings &settings, const Vec2 &screenSize) const {
 	colors.SetColor(COLOR_CON);
 	DrawConnections();
 
+	if(settings.selectedTool == TOOL_SOLDER_MASK) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		DrawSoldermaskMarked();
+		glDisable(GL_BLEND);
+	}
+
 	glDisable(GL_SCISSOR_TEST);
 }
 

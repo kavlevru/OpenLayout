@@ -170,6 +170,12 @@ void MainCanvas::OnLeftDownEvent(QMouseEvent *event) {
         measuring = true;
         measureStart = measureEnd = board->ToActiveGrid(mouse);
         EmitMeasure();
+    } else if(settings.selectedTool == TOOL_SOLDER_MASK) {
+        Object *object = board->TestPoint(mouse);
+        if(object) {
+            emit BeforeChange();        // snapshot for undo
+            board->ToggleSoldermask(object);
+        }
     } else {
 		if(board->GetFirstPlaced()) {
 			if(!board->GetFirstPlaced()->groups.Empty())

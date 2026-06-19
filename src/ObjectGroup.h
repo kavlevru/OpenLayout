@@ -53,6 +53,8 @@ public:
 	void SetSelectedToLayer(uint8_t layer); // move the selected objects to a layer
 	void ChangeSide(float mirrorX);         // flip to the other board side
 	void ResetSoldermask();                 // clear the soldermask flag on all objects
+	void ToggleSoldermask(Object *object);  // include/exclude one object from the solder mask
+	void DrawSoldermaskMarked() const;      // overlay objects flagged for the solder mask
 	void SetSelectedWidth(float width);     // set line width on the selected objects
 	void ArraySelected(int cols, int rows, const Vec2 &spacing); // duplicate in a grid
 	void DeleteSelected();
