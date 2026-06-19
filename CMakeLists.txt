@@ -14,6 +14,7 @@ set(SOURCES
     src/ColorScheme.cpp
     src/DirChooserButton.cpp
     src/File.cpp
+    src/FormDialog.cpp
     src/GLUtils.cpp
     src/GridPanel.cpp
     src/ImageConfig.cpp
@@ -51,6 +52,7 @@ set(HEADERS
     src/ColorScheme.h
     src/DirChooserButton.h
     src/File.h
+    src/FormDialog.h
     src/GLUtils.h
     src/GridPanel.h
     src/ImageConfig.h

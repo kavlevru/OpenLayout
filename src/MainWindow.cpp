@@ -2,6 +2,7 @@
 #include "Locale.h"
 
 #include "SettingsDialog.h"
+#include "FormDialog.h"
 #include "Gerber.h"
 #include "Track.h"
 #include "Poly.h"
@@ -104,6 +105,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(toolPanel, SIGNAL(ToolChanged()), mainCanvas, SLOT(FinishCreating()));
     connect(mainCanvas, SIGNAL(ToolChanged(int)), toolPanel, SLOT(OnToolChanged(int)));
     connect(mainCanvas, &MainCanvas::BeforeChange, this, &MainWindow::PushUndo);
+
+    // The Special-form tool opens a generator dialog; on OK its objects become a
+    // group that follows the cursor until clicked (a left click on the canvas
+    // drops it and reverts to Edit). Cancel just returns to Edit.
+    connect(toolPanel, &ToolPanel::ToolChanged, this, [this]{
+        if(settings.selectedTool != TOOL_FORM)
+            return;
+        Board *b = pcb.GetSelectedBoard();
+        FormDialog dlg(settings, b->GetSize(), b->GetSelectedLayer(), this);
+        if(dlg.exec() == QDialog::Accepted)
+            mainCanvas->PlaceObjectGroup(dlg.GetObjects());
+        else
+            toolPanel->OnToolChanged(TOOL_EDIT);
+    });
 
     // Helper: run an operation on the active board, then refresh the canvas.
     auto edit = [this](auto op) {
