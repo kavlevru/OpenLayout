@@ -1,7 +1,13 @@
 #include "ObjectGroup.h"
 #include "GLUtils.h"
 #include "THTPad.h"
+#include "Track.h"
+#include "Poly.h"
+#include "Circle.h"
+#include "Utils.h"
 #include <vector>
+#include <cfloat>
+#include <algorithm>
 
 ObjectGroup::ObjectGroup(const ObjectGroup &other) {
 	Object *last = nullptr;
@@ -226,6 +232,121 @@ void ObjectGroup::ResetSoldermask() {
 
 void ObjectGroup::ToggleSoldermask(Object *object) {
 	object->soldermask = !object->soldermask;
+}
+
+// --- Continuity test (approximate copper connectivity) ----------------------
+//
+// Two copper objects connect if they share a copper layer and their geometry
+// touches. Metallised through-pads bridge all copper layers. The touch test is
+// a heuristic: minimum distance between the objects' outlines (polyline for
+// tracks/zones, disc for pads/circles) compared against their half-widths.
+
+static bool layerIsCopper(uint8_t l) {
+	return l == ObjectGroup::LAYER_C1 || l == ObjectGroup::LAYER_C2 ||
+	       l == ObjectGroup::LAYER_I1 || l == ObjectGroup::LAYER_I2;
+}
+
+static uint8_t copperMask(const Object *o) {
+	if(o->GetType() == Object::THT_PAD && ((const THTPad*) o)->HasMetallization())
+		return (1 << ObjectGroup::LAYER_C1) | (1 << ObjectGroup::LAYER_C2) |
+		       (1 << ObjectGroup::LAYER_I1) | (1 << ObjectGroup::LAYER_I2);
+	uint8_t l = o->GetLayer();
+	return layerIsCopper(l) ? (1 << l) : 0;
+}
+
+static void shapeOf(const Object *o, std::vector<Vec2> &pts, float &halfWidth) {
+	pts.clear();
+	switch(o->GetType()) {
+	case Object::TRACK:
+	case Object::POLY: {
+		const PolygonBase *p = (const PolygonBase*) o;
+		for(uint32_t i = 0; i < p->points.Size(); i++)
+			pts.push_back(p->points[i]);
+		halfWidth = ((const LineObject*) o)->GetWidth() / 2.0f;
+		if(pts.empty())
+			pts.push_back(o->GetPosition());
+		break;
+	}
+	case Object::CIRCLE:
+		pts.push_back(o->GetPosition());
+		halfWidth = ((const Circle*) o)->GetDiameter() / 2.0f;
+		break;
+	default: {                       // pads
+		AABB box = o->GetAABB();
+		Vec2 s = box.Size();
+		pts.push_back(o->GetPosition());
+		halfWidth = 0.5f * std::min(s.x, s.y);
+		break;
+	}
+	}
+}
+
+static float pointSeg(const Vec2 &p, const Vec2 &a, const Vec2 &b) {
+	Vec2 ab = b - a;
+	float len2 = ab.LengthSq();
+	if(len2 < 1e-9f)
+		return (p - a).Length();
+	float t = Vec2::Dot(p - a, ab) / len2;
+	if(t < 0.0f) t = 0.0f;
+	else if(t > 1.0f) t = 1.0f;
+	return (p - (a + ab * t)).Length();
+}
+
+static bool objectsConnect(const Object *a, const Object *b) {
+	uint8_t ma = copperMask(a), mb = copperMask(b);
+	if(!ma || !mb || !(ma & mb))
+		return false;
+
+	std::vector<Vec2> pa, pb;
+	float ha, hb;
+	shapeOf(a, pa, ha);
+	shapeOf(b, pb, hb);
+	float reach = ha + hb + 0.05f;
+
+	AABB ba = a->GetAABB();
+	if(!ba.Expand(reach).TestOverlap(b->GetAABB()))
+		return false;
+
+	float best = FLT_MAX;
+	for(size_t i = 0; i < pa.size(); i++) {
+		if(pb.size() == 1)
+			best = std::min(best, (pa[i] - pb[0]).Length());
+		else for(size_t j = 0; j + 1 < pb.size(); j++)
+			best = std::min(best, pointSeg(pa[i], pb[j], pb[j + 1]));
+	}
+	for(size_t i = 0; i < pb.size(); i++) {
+		if(pa.size() == 1)
+			best = std::min(best, (pb[i] - pa[0]).Length());
+		else for(size_t j = 0; j + 1 < pa.size(); j++)
+			best = std::min(best, pointSeg(pb[i], pa[j], pa[j + 1]));
+	}
+	if(best <= reach)
+		return true;
+
+	if(pa.size() > 1 && pb.size() > 1)             // crossing tracks
+		for(size_t i = 0; i + 1 < pa.size(); i++)
+			for(size_t j = 0; j + 1 < pb.size(); j++)
+				if(utils::IntersectTwoLines(pa[i], pa[i + 1], pb[j], pb[j + 1]))
+					return true;
+	return false;
+}
+
+void ObjectGroup::SelectConnected(Object *start) {
+	UnselectAll();
+	if(!start || !copperMask(start))
+		return;
+	std::vector<Object*> stack;
+	start->Select();
+	stack.push_back(start);
+	while(!stack.empty()) {
+		Object *a = stack.back();
+		stack.pop_back();
+		for(Object *b = objects; b; b = b->next)
+			if(!b->IsSelected() && objectsConnect(a, b)) {
+				b->Select();
+				stack.push_back(b);
+			}
+	}
 }
 
 void ObjectGroup::DrawSoldermaskMarked() const {

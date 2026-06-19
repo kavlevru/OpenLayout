@@ -176,6 +176,8 @@ void MainCanvas::OnLeftDownEvent(QMouseEvent *event) {
             emit BeforeChange();        // snapshot for undo
             board->ToggleSoldermask(object);
         }
+    } else if(settings.selectedTool == TOOL_TEST) {
+        board->SelectConnected(board->TestPoint(mouse));
     } else {
 		if(board->GetFirstPlaced()) {
 			if(!board->GetFirstPlaced()->groups.Empty())
@@ -215,6 +217,8 @@ void MainCanvas::OnRightDownEvent(QMouseEvent *event) {
 		measuring = false;
 		emit Measured(QString());
 	}
+	else if(settings.selectedTool == TOOL_TEST)
+		board->UnselectAll();
 	else if(settings.selectedTool != TOOL_EDIT) {
 		if(placedPointCount == 0)
             emit ToolChanged(TOOL_EDIT);
