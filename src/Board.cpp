@@ -4,6 +4,10 @@
 #include "THTPad.h"
 #include "Circle.h"
 #include "Track.h"
+#include <queue>
+#include <algorithm>
+#include <functional>
+#include <cfloat>
 
 Board::Board(const char *_name, Type type, Vec2 innerSize, float border, bool originTop) : Board() {
 	objects = nullptr;
@@ -459,9 +463,20 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		}
 	}
 
+	// Route short connections first — long nets otherwise block many later ones.
+	std::sort(pairs.begin(), pairs.end(),
+		[](const std::pair<Pad*, Pad*> &x, const std::pair<Pad*, Pad*> &y) {
+			Vec2 dx = x.first->GetPosition() - x.second->GetPosition();
+			Vec2 dy = y.first->GetPosition() - y.second->GetPosition();
+			return std::abs(dx.x) + std::abs(dx.y) < std::abs(dy.x) + std::abs(dy.y);
+		});
+
 	int routed = 0, total = pairs.size();
-	std::vector<int> prev(cols * rows);
-	std::vector<char> seen(cols * rows);
+	const int dc[4] = {1, -1, 0, 0}, dr[4] = {0, 0, 1, -1};
+	const float bend = 2.0f;                     // turn penalty, in cell steps
+	int states = cols * rows * 5;                // state = cell * 5 + incoming dir (4 = none)
+	std::vector<float> dist(states);
+	std::vector<int> prev(states);
 
 	for(auto &pr : pairs) {
 		Pad *a = pr.first, *b = pr.second;
@@ -483,38 +498,50 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		work[idx(sc, sr)] = 0;
 		work[idx(gc, gr)] = 0;
 
-		// BFS.
-		std::fill(seen.begin(), seen.end(), 0);
-		std::vector<int> queue;
-		queue.push_back(idx(sc, sr));
-		seen[idx(sc, sr)] = 1;
-		prev[idx(sc, sr)] = -1;
-		size_t head = 0;
-		bool found = false;
-		const int dc[4] = {1, -1, 0, 0}, dr[4] = {0, 0, 1, -1};
-		while(head < queue.size()) {
-			int cur = queue[head++];
-			if(cur == idx(gc, gr)) { found = true; break; }
-			int cc = cur % cols, cr = cur / cols;
+		// Dijkstra with a bend penalty for straighter, less-blocking routes.
+		std::fill(dist.begin(), dist.end(), FLT_MAX);
+		std::priority_queue<std::pair<float, int>, std::vector<std::pair<float, int>>,
+		                    std::greater<std::pair<float, int>>> pq;
+		int startState = idx(sc, sr) * 5 + 4;
+		dist[startState] = 0.0f;
+		prev[startState] = -1;
+		pq.push({0.0f, startState});
+		int goalState = -1;
+		while(!pq.empty()) {
+			float cost = pq.top().first;
+			int state = pq.top().second;
+			pq.pop();
+			if(cost > dist[state])
+				continue;
+			int cell = state / 5, curDir = state % 5;
+			if(cell == idx(gc, gr)) { goalState = state; break; }
+			int cc = cell % cols, cr = cell / cols;
 			for(int k = 0; k < 4; k++) {
 				int nc = cc + dc[k], nr = cr + dr[k];
 				if(nc < 0 || nc >= cols || nr < 0 || nr >= rows)
 					continue;
-				int ni = idx(nc, nr);
-				if(seen[ni] || work[ni])
+				int ncell = idx(nc, nr);
+				if(work[ncell])
 					continue;
-				seen[ni] = 1;
-				prev[ni] = cur;
-				queue.push_back(ni);
+				float ncost = cost + 1.0f + ((curDir != 4 && curDir != k) ? bend : 0.0f);
+				int nstate = ncell * 5 + k;
+				if(ncost < dist[nstate]) {
+					dist[nstate] = ncost;
+					prev[nstate] = state;
+					pq.push({ncost, nstate});
+				}
 			}
 		}
-		if(!found)
+		if(goalState < 0)
 			continue;
 
-		// Backtrace into a cell path (goal -> start), then build the polyline.
+		// Backtrace into a cell path (goal -> start).
 		std::vector<int> cells;
-		for(int cur = idx(gc, gr); cur != -1; cur = prev[cur])
-			cells.push_back(cur);
+		for(int s = goalState; s != -1; s = prev[s]) {
+			int cell = s / 5;
+			if(cells.empty() || cells.back() != cell)
+				cells.push_back(cell);
+		}
 		std::vector<Vec2> pts;
 		pts.push_back(a->GetPosition());
 		for(int i = (int)cells.size() - 1; i >= 0; i--)
