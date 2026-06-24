@@ -392,26 +392,36 @@ void Board::DrawSelected() const {
 
 // --- Autorouter -------------------------------------------------------------
 //
-// A basic single-layer Lee (maze) router. It rasterises existing copper on the
-// route layer into an obstacle grid (dilated by one cell for clearance), then
-// BFS-routes each pad rubber-band connection on a Manhattan grid, dropping the
-// connection and adding a track when it succeeds. It does not rip up, reorder
-// nets or use multiple layers, so on dense boards many nets will be left for
-// manual routing.
+// A two-layer Lee/Dijkstra (maze) router. Existing copper on the top (C1) and
+// bottom (C2) sides is rasterised into per-side obstacle grids, dilated by one
+// cell for clearance. Each pad rubber-band connection is routed on a Manhattan
+// grid with a turn penalty (straighter tracks) and a via cost for switching
+// sides; vias are dropped as metallised through-pads where a cell is free on
+// both sides. Shorter nets route first. There is no rip-up/reroute, so dense
+// boards may still leave some nets for manual routing.
 
-static bool autorouteLayerCopper(uint8_t l) {
-	return l == ObjectGroup::LAYER_C1 || l == ObjectGroup::LAYER_C2 ||
-	       l == ObjectGroup::LAYER_I1 || l == ObjectGroup::LAYER_I2;
+// side 0 = top copper (C1), side 1 = bottom copper (C2)
+static uint8_t autorouteSideLayer(int side) {
+	return side == 0 ? ObjectGroup::LAYER_C1 : ObjectGroup::LAYER_C2;
 }
 
-static bool autorouteBlocks(const Object *o, uint8_t layer) {
-	if(o->GetType() == Object::THT_PAD && ((const THTPad*) o)->HasMetallization())
-		return autorouteLayerCopper(layer);
-	return o->GetLayer() == layer && autorouteLayerCopper(o->GetLayer());
+static bool autorouteBlocks(const Object *o, int side) {
+	if(o->GetType() == Object::THT_PAD)
+		return true;                                  // through-pad blocks both sides
+	return o->GetLayer() == autorouteSideLayer(side);
+}
+
+// Sides a pad can be routed on: bit0 = top, bit1 = bottom.
+static uint8_t autoroutePadSides(const Pad *p) {
+	if(p->GetType() == Object::THT_PAD)
+		return 0x3;
+	uint8_t l = p->GetLayer();
+	if(l == ObjectGroup::LAYER_C1) return 0x1;
+	if(l == ObjectGroup::LAYER_C2) return 0x2;
+	return 0;
 }
 
 std::pair<int, int> Board::Autoroute(const Settings &settings) {
-	uint8_t layer = IsSelectedLayerCopper() ? GetSelectedLayer() : (uint8_t) LAYER_C1;
 	float clearance = settings.groundDistance;
 	float tw = settings.trackSize;
 	float pitch = tw + 2.0f * clearance;
@@ -427,28 +437,34 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	auto center = [&](int c, int r) { return Vec2((c + 0.5f) * pitch, (r + 0.5f) * pitch); };
 	auto clampC = [&](int c) { return c < 0 ? 0 : (c >= cols ? cols - 1 : c); };
 	auto clampR = [&](int r) { return r < 0 ? 0 : (r >= rows ? rows - 1 : r); };
+	auto blockCell = [&](std::vector<char> &g, int cell) {
+		int cc = cell % cols, cr = cell / cols;
+		for(int ddr = -1; ddr <= 1; ddr++)
+			for(int ddc = -1; ddc <= 1; ddc++)
+				g[idx(clampC(cc + ddc), clampR(cr + ddr))] = 1;
+	};
 
-	// Base obstacle grid from existing copper on the route layer.
-	std::vector<char> base(cols * rows, 0);
-	for(Object *o = objects; o; o = o->GetNext()) {
-		if(!autorouteBlocks(o, layer))
-			continue;
-		AABB box = o->GetAABB();
-		int c0 = clampC((int)(box.lower.x / pitch) - 1), c1 = clampC((int)(box.upper.x / pitch) + 1);
-		int r0 = clampR((int)(box.lower.y / pitch) - 1), r1 = clampR((int)(box.upper.y / pitch) + 1);
-		for(int r = r0; r <= r1; r++)
-			for(int c = c0; c <= c1; c++)
-				if(o->TestPoint(center(c, r)))
-					base[idx(c, r)] = 1;
+	// Per-side obstacle grids (dilated for clearance): side 0 = top, 1 = bottom.
+	std::vector<char> obst[2] = {std::vector<char>(cols * rows, 0),
+	                             std::vector<char>(cols * rows, 0)};
+	for(int side = 0; side < 2; side++) {
+		std::vector<char> base(cols * rows, 0);
+		for(Object *o = objects; o; o = o->GetNext()) {
+			if(!autorouteBlocks(o, side))
+				continue;
+			AABB box = o->GetAABB();
+			int c0 = clampC((int)(box.lower.x / pitch) - 1), c1 = clampC((int)(box.upper.x / pitch) + 1);
+			int r0 = clampR((int)(box.lower.y / pitch) - 1), r1 = clampR((int)(box.upper.y / pitch) + 1);
+			for(int r = r0; r <= r1; r++)
+				for(int c = c0; c <= c1; c++)
+					if(o->TestPoint(center(c, r)))
+						base[idx(c, r)] = 1;
+		}
+		for(int r = 0; r < rows; r++)
+			for(int c = 0; c < cols; c++)
+				if(base[idx(c, r)])
+					blockCell(obst[side], idx(c, r));
 	}
-	// Dilate by one cell so routed tracks keep clearance from obstacles.
-	std::vector<char> obst(cols * rows, 0);
-	for(int r = 0; r < rows; r++)
-		for(int c = 0; c < cols; c++)
-			if(base[idx(c, r)])
-				for(int dr = -1; dr <= 1; dr++)
-					for(int dc = -1; dc <= 1; dc++)
-						obst[idx(clampC(c + dc), clampR(r + dr))] = 1;
 
 	// Collect unique connection pairs.
 	std::vector<std::pair<Pad*, Pad*>> pairs;
@@ -473,39 +489,65 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 
 	int routed = 0, total = pairs.size();
 	const int dc[4] = {1, -1, 0, 0}, dr[4] = {0, 0, 1, -1};
-	const float bend = 2.0f;                     // turn penalty, in cell steps
-	int states = cols * rows * 5;                // state = cell * 5 + incoming dir (4 = none)
-	std::vector<float> dist(states);
-	std::vector<int> prev(states);
+	const float bend = 2.0f;                      // turn penalty, in cell steps
+	const float viaCost = 12.0f;                  // cost of switching sides
+	// state = (cell * 2 + side) * 5 + incoming dir (4 = none)
+	int nStates = cols * rows * 2 * 5;
+	std::vector<float> dist(nStates);
+	std::vector<int> prev(nStates);
+
+	auto simplify = [&](const std::vector<Vec2> &in) {
+		std::vector<Vec2> s;
+		for(const Vec2 &p : in) {
+			if(s.size() >= 2) {
+				Vec2 &x = s[s.size() - 2], &y = s[s.size() - 1];
+				if(std::abs(utils::Orientation(x, y, p)) < 1e-4f)
+					s.pop_back();
+			}
+			if(s.empty() || (s.back() - p).LengthSq() > 1e-6f)
+				s.push_back(p);
+		}
+		return s;
+	};
 
 	for(auto &pr : pairs) {
 		Pad *a = pr.first, *b = pr.second;
+		uint8_t startSides = autoroutePadSides(a), goalSides = autoroutePadSides(b);
+		if(!startSides || !goalSides)
+			continue;
 
-		// Working grid: free the footprints of the two endpoint pads.
-		std::vector<char> work = obst;
+		// Working grids: free both endpoint pads' footprints on both sides.
+		std::vector<char> work[2] = {obst[0], obst[1]};
 		for(Pad *pad : {a, b}) {
 			AABB box = pad->GetAABB();
 			int c0 = clampC((int)(box.lower.x / pitch) - 1), c1 = clampC((int)(box.upper.x / pitch) + 1);
 			int r0 = clampR((int)(box.lower.y / pitch) - 1), r1 = clampR((int)(box.upper.y / pitch) + 1);
 			for(int r = r0; r <= r1; r++)
 				for(int c = c0; c <= c1; c++)
-					if(pad->TestPoint(center(c, r)))
-						work[idx(c, r)] = 0;
+					if(pad->TestPoint(center(c, r))) {
+						work[0][idx(c, r)] = 0;
+						work[1][idx(c, r)] = 0;
+					}
 		}
 
 		int sc = clampC((int)(a->GetPosition().x / pitch)), sr = clampR((int)(a->GetPosition().y / pitch));
 		int gc = clampC((int)(b->GetPosition().x / pitch)), gr = clampR((int)(b->GetPosition().y / pitch));
-		work[idx(sc, sr)] = 0;
-		work[idx(gc, gr)] = 0;
+		int startCell = idx(sc, sr), goalCell = idx(gc, gr);
+		work[0][startCell] = work[1][startCell] = 0;
+		work[0][goalCell]  = work[1][goalCell]  = 0;
 
-		// Dijkstra with a bend penalty for straighter, less-blocking routes.
+		auto stateOf = [&](int cell, int side, int dir) { return (cell * 2 + side) * 5 + dir; };
+
 		std::fill(dist.begin(), dist.end(), FLT_MAX);
 		std::priority_queue<std::pair<float, int>, std::vector<std::pair<float, int>>,
 		                    std::greater<std::pair<float, int>>> pq;
-		int startState = idx(sc, sr) * 5 + 4;
-		dist[startState] = 0.0f;
-		prev[startState] = -1;
-		pq.push({0.0f, startState});
+		for(int side = 0; side < 2; side++)
+			if((startSides >> side) & 1) {
+				int st = stateOf(startCell, side, 4);
+				dist[st] = 0.0f;
+				prev[st] = -1;
+				pq.push({0.0f, st});
+			}
 		int goalState = -1;
 		while(!pq.empty()) {
 			float cost = pq.top().first;
@@ -513,18 +555,27 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			pq.pop();
 			if(cost > dist[state])
 				continue;
-			int cell = state / 5, curDir = state % 5;
-			if(cell == idx(gc, gr)) { goalState = state; break; }
+			int dir = state % 5, tmp = state / 5, side = tmp % 2, cell = tmp / 2;
+			if(cell == goalCell && ((goalSides >> side) & 1)) { goalState = state; break; }
 			int cc = cell % cols, cr = cell / cols;
-			for(int k = 0; k < 4; k++) {
+			for(int k = 0; k < 4; k++) {            // planar moves on the current side
 				int nc = cc + dc[k], nr = cr + dr[k];
 				if(nc < 0 || nc >= cols || nr < 0 || nr >= rows)
 					continue;
 				int ncell = idx(nc, nr);
-				if(work[ncell])
+				if(work[side][ncell])
 					continue;
-				float ncost = cost + 1.0f + ((curDir != 4 && curDir != k) ? bend : 0.0f);
-				int nstate = ncell * 5 + k;
+				float ncost = cost + 1.0f + ((dir != 4 && dir != k) ? bend : 0.0f);
+				int nstate = stateOf(ncell, side, k);
+				if(ncost < dist[nstate]) {
+					dist[nstate] = ncost;
+					prev[nstate] = state;
+					pq.push({ncost, nstate});
+				}
+			}
+			if(!work[0][cell] && !work[1][cell]) {  // via: switch side if free on both
+				int nstate = stateOf(cell, 1 - side, 4);
+				float ncost = cost + viaCost;
 				if(ncost < dist[nstate]) {
 					dist[nstate] = ncost;
 					prev[nstate] = state;
@@ -535,42 +586,50 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		if(goalState < 0)
 			continue;
 
-		// Backtrace into a cell path (goal -> start).
-		std::vector<int> cells;
-		for(int s = goalState; s != -1; s = prev[s]) {
-			int cell = s / 5;
-			if(cells.empty() || cells.back() != cell)
-				cells.push_back(cell);
-		}
-		std::vector<Vec2> pts;
-		pts.push_back(a->GetPosition());
-		for(int i = (int)cells.size() - 1; i >= 0; i--)
-			pts.push_back(center(cells[i] % cols, cells[i] / cols));
-		pts.push_back(b->GetPosition());
+		// Backtrace into a (cell, side) path, start -> goal.
+		std::vector<std::pair<int, int>> path;       // {cell, side}
+		for(int s = goalState; s != -1; s = prev[s])
+			path.push_back({(s / 5) / 2, (s / 5) % 2});
+		std::reverse(path.begin(), path.end());
 
-		// Drop collinear/duplicate intermediate points.
-		std::vector<Vec2> simple;
-		for(const Vec2 &p : pts) {
-			if(simple.size() >= 2) {
-				Vec2 &x = simple[simple.size() - 2], &y = simple[simple.size() - 1];
-				if(std::abs(utils::Orientation(x, y, p)) < 1e-4f)
-					simple.pop_back();
+		// Emit one track per same-side run, with a via pad at each side change.
+		std::vector<Vec2> viaPositions;
+		bool madeTrack = false, first = true;
+		size_t i = 0;
+		while(i < path.size()) {
+			int side = path[i].second;
+			std::vector<Vec2> run;
+			size_t j = i;
+			while(j < path.size() && path[j].second == side) {
+				run.push_back(center(path[j].first % cols, path[j].first / cols));
+				j++;
 			}
-			if(simple.empty() || (simple.back() - p).LengthSq() > 1e-6f)
-				simple.push_back(p);
+			if(first)
+				run.insert(run.begin(), a->GetPosition());
+			bool last = (j >= path.size());
+			if(last)
+				run.push_back(b->GetPosition());
+			std::vector<Vec2> simple = simplify(run);
+			if(simple.size() >= 2) {
+				AddObjectEnd(new Track(autorouteSideLayer(side), clearance, tw,
+				                       simple.data(), simple.size()));
+				madeTrack = true;
+			}
+			if(!last)
+				viaPositions.push_back(center(path[j].first % cols, path[j].first / cols));
+			first = false;
+			i = j;
 		}
-		if(simple.size() < 2)
+		if(!madeTrack)
 			continue;
 
-		AddObjectEnd(new Track(layer, clearance, tw, simple.data(), simple.size()));
+		for(const Vec2 &vp : viaPositions)
+			AddObjectEnd(new THTPad((uint8_t) LAYER_C1, clearance, vp,
+			                        settings.padSize, settings.padShape, true));
 
-		// Mark the routed cells (dilated) as obstacles for later nets.
-		for(int cell : cells) {
-			int cc = cell % cols, cr = cell / cols;
-			for(int ddr = -1; ddr <= 1; ddr++)
-				for(int ddc = -1; ddc <= 1; ddc++)
-					obst[idx(clampC(cc + ddc), clampR(cr + ddr))] = 1;
-		}
+		// Mark routed cells (dilated) as obstacles on their side for later nets.
+		for(auto &cs : path)
+			blockCell(obst[cs.second], cs.first);
 
 		a->RemoveConnections(b);   // rip the rubber-band; removes both directions
 		routed++;
