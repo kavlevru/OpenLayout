@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <functional>
 #include <cfloat>
+#include <cmath>
 
 Board::Board(const char *_name, Type type, Vec2 innerSize, float border, bool originTop) : Board() {
 	objects = nullptr;
@@ -428,13 +429,35 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	if(pitch < 0.1f)
 		pitch = 0.1f;
 
-	int cols = (int)(size.x / pitch) + 1;
-	int rows = (int)(size.y / pitch) + 1;
+	// Collect unique connection pairs first — the first pad anchors the routing
+	// grid so its nodes fall on pad centres (tracks then pass through the
+	// centres instead of running offset beside them).
+	std::vector<std::pair<Pad*, Pad*>> pairs;
+	for(Object *o = objects; o; o = o->GetNext()) {
+		if(!o->IsPad())
+			continue;
+		Pad *p = (Pad*) o;
+		for(uint32_t i = 0; i < p->ConnectionCount(); i++) {
+			Pad *q = p->GetConnection(i);
+			if(p < q)
+				pairs.push_back({p, q});
+		}
+	}
+	if(pairs.empty())
+		return {0, 0};
+
+	Vec2 ref = pairs[0].first->GetPosition();
+	Vec2 off(std::fmod(ref.x, pitch), std::fmod(ref.y, pitch));   // grid node alignment
+
+	auto node   = [&](int c, int r) { return Vec2(off.x + c * pitch, off.y + r * pitch); };
+	auto cellX  = [&](float x) { return (int) std::lround((x - off.x) / pitch); };
+	auto cellY  = [&](float y) { return (int) std::lround((y - off.y) / pitch); };
+	int cols = cellX(size.x) + 2;
+	int rows = cellY(size.y) + 2;
 	if(cols < 2 || rows < 2)
 		return {0, 0};
 
 	auto idx    = [&](int c, int r) { return r * cols + c; };
-	auto center = [&](int c, int r) { return Vec2((c + 0.5f) * pitch, (r + 0.5f) * pitch); };
 	auto clampC = [&](int c) { return c < 0 ? 0 : (c >= cols ? cols - 1 : c); };
 	auto clampR = [&](int r) { return r < 0 ? 0 : (r >= rows ? rows - 1 : r); };
 	auto blockCell = [&](std::vector<char> &g, int cell) {
@@ -453,30 +476,17 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			if(!autorouteBlocks(o, side))
 				continue;
 			AABB box = o->GetAABB();
-			int c0 = clampC((int)(box.lower.x / pitch) - 1), c1 = clampC((int)(box.upper.x / pitch) + 1);
-			int r0 = clampR((int)(box.lower.y / pitch) - 1), r1 = clampR((int)(box.upper.y / pitch) + 1);
+			int c0 = clampC(cellX(box.lower.x) - 1), c1 = clampC(cellX(box.upper.x) + 1);
+			int r0 = clampR(cellY(box.lower.y) - 1), r1 = clampR(cellY(box.upper.y) + 1);
 			for(int r = r0; r <= r1; r++)
 				for(int c = c0; c <= c1; c++)
-					if(o->TestPoint(center(c, r)))
+					if(o->TestPoint(node(c, r)))
 						base[idx(c, r)] = 1;
 		}
 		for(int r = 0; r < rows; r++)
 			for(int c = 0; c < cols; c++)
 				if(base[idx(c, r)])
 					blockCell(obst[side], idx(c, r));
-	}
-
-	// Collect unique connection pairs.
-	std::vector<std::pair<Pad*, Pad*>> pairs;
-	for(Object *o = objects; o; o = o->GetNext()) {
-		if(!o->IsPad())
-			continue;
-		Pad *p = (Pad*) o;
-		for(uint32_t i = 0; i < p->ConnectionCount(); i++) {
-			Pad *q = p->GetConnection(i);
-			if(p < q)
-				pairs.push_back({p, q});
-		}
 	}
 
 	// Route short connections first — long nets otherwise block many later ones.
@@ -520,18 +530,18 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		std::vector<char> work[2] = {obst[0], obst[1]};
 		for(Pad *pad : {a, b}) {
 			AABB box = pad->GetAABB();
-			int c0 = clampC((int)(box.lower.x / pitch) - 1), c1 = clampC((int)(box.upper.x / pitch) + 1);
-			int r0 = clampR((int)(box.lower.y / pitch) - 1), r1 = clampR((int)(box.upper.y / pitch) + 1);
+			int c0 = clampC(cellX(box.lower.x) - 1), c1 = clampC(cellX(box.upper.x) + 1);
+			int r0 = clampR(cellY(box.lower.y) - 1), r1 = clampR(cellY(box.upper.y) + 1);
 			for(int r = r0; r <= r1; r++)
 				for(int c = c0; c <= c1; c++)
-					if(pad->TestPoint(center(c, r))) {
+					if(pad->TestPoint(node(c, r))) {
 						work[0][idx(c, r)] = 0;
 						work[1][idx(c, r)] = 0;
 					}
 		}
 
-		int sc = clampC((int)(a->GetPosition().x / pitch)), sr = clampR((int)(a->GetPosition().y / pitch));
-		int gc = clampC((int)(b->GetPosition().x / pitch)), gr = clampR((int)(b->GetPosition().y / pitch));
+		int sc = clampC(cellX(a->GetPosition().x)), sr = clampR(cellY(a->GetPosition().y));
+		int gc = clampC(cellX(b->GetPosition().x)), gr = clampR(cellY(b->GetPosition().y));
 		int startCell = idx(sc, sr), goalCell = idx(gc, gr);
 		work[0][startCell] = work[1][startCell] = 0;
 		work[0][goalCell]  = work[1][goalCell]  = 0;
@@ -601,7 +611,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			std::vector<Vec2> run;
 			size_t j = i;
 			while(j < path.size() && path[j].second == side) {
-				run.push_back(center(path[j].first % cols, path[j].first / cols));
+				run.push_back(node(path[j].first % cols, path[j].first / cols));
 				j++;
 			}
 			if(first)
@@ -616,7 +626,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 				madeTrack = true;
 			}
 			if(!last)
-				viaPositions.push_back(center(path[j].first % cols, path[j].first / cols));
+				viaPositions.push_back(node(path[j].first % cols, path[j].first / cols));
 			first = false;
 			i = j;
 		}
