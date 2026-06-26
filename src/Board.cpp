@@ -502,6 +502,12 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 				}
 		}
 
+	// baseCnt = fixed copper only (no routed nets); owner = which net occupies a
+	// cell (-1 = none). Both drive negotiated rip-up below.
+	std::vector<int> baseCnt[2] = {cnt[0], cnt[1]};
+	std::vector<int> owner[2] = {std::vector<int>(cols * rows, -1),
+	                             std::vector<int>(cols * rows, -1)};
+
 	// Route short connections first — long nets otherwise block many later ones.
 	std::sort(pairs.begin(), pairs.end(),
 		[](const std::pair<Pad*, Pad*> &x, const std::pair<Pad*, Pad*> &y) {
@@ -540,8 +546,8 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		std::vector<Vec2> vias;
 	};
 
-	// Route a-b on the current obstacle counts without mutating any state.
-	auto tryRoute = [&](Pad *a, Pad *b) -> Res {
+	// Route a-b against the given obstacle-count grids without mutating state.
+	auto tryRoute = [&](Pad *a, Pad *b, const std::vector<int> *grid) -> Res {
 		Res res;
 		uint8_t startSides = autoroutePadSides(a), goalSides = autoroutePadSides(b);
 		if(!startSides || !goalSides)
@@ -550,8 +556,8 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		std::vector<char> work[2] = {std::vector<char>(cols * rows),
 		                             std::vector<char>(cols * rows)};
 		for(int i = 0; i < cols * rows; i++) {
-			work[0][i] = cnt[0][i] > 0;
-			work[1][i] = cnt[1][i] > 0;
+			work[0][i] = grid[0][i] > 0;
+			work[1][i] = grid[1][i] > 0;
 		}
 		// Undo each endpoint pad's contribution (its 3x3 cells + dilation ring)
 		// so the track can leave its own pad.
@@ -661,8 +667,20 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		return res;
 	};
 
-	// Commit a route: add its objects to the board and its cells to the grids.
-	auto commit = [&](const Res &res, std::vector<Object*> &objs) {
+	// Reserve / release a route's cells on the live grids and owner map.
+	auto addCells = [&](const Res &res, int netIdx) {
+		for(auto &cs : res.cells) {
+			addObst(cnt[cs.second], cs.first, +1);
+			owner[cs.second][cs.first] = netIdx;
+		}
+	};
+	auto delCells = [&](const std::vector<std::pair<int, int>> &cells) {
+		for(auto &cs : cells) {
+			addObst(cnt[cs.second], cs.first, -1);
+			owner[cs.second][cs.first] = -1;
+		}
+	};
+	auto makeObjects = [&](const Res &res, std::vector<Object*> &objs) {
 		for(auto &t : res.tracks) {
 			Track *trk = new Track((uint8_t) t.first, clearance, tw, t.second.data(), t.second.size());
 			AddObjectEnd(trk);
@@ -673,8 +691,6 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			AddObjectEnd(via);
 			objs.push_back(via);
 		}
-		for(auto &cs : res.cells)
-			addObst(cnt[cs.second], cs.first, +1);
 	};
 
 	struct Net {
@@ -689,34 +705,106 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		nets.push_back({pr.first, pr.second});
 
 	int routed = 0, total = nets.size();
-	for(Net &n : nets) {                                // greedy first pass
-		Res r = tryRoute(n.a, n.b);
-		if(r.ok) { commit(r, n.objs); n.routed = true; n.len = r.len; n.cells = r.cells; routed++; }
+	auto place = [&](int i, const Res &r) {            // commit a fresh route
+		makeObjects(r, nets[i].objs);
+		addCells(r, i);
+		nets[i].routed = true; nets[i].len = r.len; nets[i].cells = r.cells;
+	};
+
+	for(int i = 0; i < (int) nets.size(); i++) {       // greedy first pass
+		Res r = tryRoute(nets[i].a, nets[i].b, cnt);
+		if(r.ok) { place(i, r); routed++; }
 	}
 
-	// Rip-up & reroute: free a net's cells, reroute it (keep only if strictly
-	// shorter), and retry unrouted nets now that some space may be free.
+	// Conservative rip-up: reroute a net only if strictly shorter; retry unrouted.
 	for(int pass = 0; pass < 3; pass++) {
 		bool changed = false;
-		for(Net &n : nets) {
-			if(n.routed) {
-				for(auto &cs : n.cells)
-					addObst(cnt[cs.second], cs.first, -1);
-				Res r = tryRoute(n.a, n.b);
-				if(r.ok && r.len < n.len - 1e-3f) {
-					for(Object *o : n.objs)
-						RemoveObject(o);
-					n.objs.clear();
-					commit(r, n.objs);
-					n.len = r.len; n.cells = r.cells;
+		for(int i = 0; i < (int) nets.size(); i++) {
+			if(nets[i].routed) {
+				std::vector<std::pair<int, int>> saved = nets[i].cells;
+				delCells(saved);
+				Res r = tryRoute(nets[i].a, nets[i].b, cnt);
+				if(r.ok && r.len < nets[i].len - 1e-3f) {
+					for(Object *o : nets[i].objs) RemoveObject(o);
+					nets[i].objs.clear();
+					place(i, r);
 					changed = true;
 				} else {
-					for(auto &cs : n.cells)        // keep the existing route
-						addObst(cnt[cs.second], cs.first, +1);
+					for(auto &cs : saved) { addObst(cnt[cs.second], cs.first, +1); owner[cs.second][cs.first] = i; }
 				}
 			} else {
-				Res r = tryRoute(n.a, n.b);
-				if(r.ok) { commit(r, n.objs); n.routed = true; n.len = r.len; n.cells = r.cells; routed++; changed = true; }
+				Res r = tryRoute(nets[i].a, nets[i].b, cnt);
+				if(r.ok) { place(i, r); routed++; changed = true; }
+			}
+		}
+		if(!changed)
+			break;
+	}
+
+	// Negotiated rip-up: for a detoured net, rip the nets blocking its ideal
+	// (copper-only) path, route it straight, then reroute the blockers. Keep the
+	// swap only if the group's total wire length strictly drops, so it can never
+	// make the result worse.
+	for(int pass = 0; pass < 2; pass++) {
+		bool changed = false;
+		for(int i = 0; i < (int) nets.size(); i++) {
+			if(!nets[i].routed)
+				continue;
+			Res ideal = tryRoute(nets[i].a, nets[i].b, baseCnt);
+			if(!ideal.ok || ideal.len >= nets[i].len - 1e-3f)
+				continue;
+
+			std::vector<int> group;
+			group.push_back(i);
+			for(auto &cs : ideal.cells) {
+				int ow = owner[cs.second][cs.first];
+				if(ow >= 0 && ow != i && std::find(group.begin(), group.end(), ow) == group.end())
+					group.push_back(ow);
+			}
+			if(group.size() == 1)
+				continue;
+
+			float oldTotal = 0.0f;
+			std::vector<std::vector<std::pair<int, int>>> oldCells(group.size());
+			std::vector<std::vector<Object*>> oldObjs(group.size());
+			for(size_t k = 0; k < group.size(); k++) {
+				int gi = group[k];
+				oldTotal += nets[gi].len;
+				oldCells[k] = nets[gi].cells;
+				oldObjs[k]  = nets[gi].objs;
+				delCells(nets[gi].cells);              // free counts/owner, keep objects
+			}
+
+			bool allOk = true;
+			float newTotal = 0.0f;
+			std::vector<Res> newRes(group.size());
+			for(size_t k = 0; k < group.size(); k++) {
+				Res r = tryRoute(nets[group[k]].a, nets[group[k]].b, cnt);
+				if(!r.ok) { allOk = false; break; }
+				addCells(r, group[k]);                 // reserve before the next route
+				newRes[k] = r;
+				newTotal += r.len;
+			}
+
+			if(allOk && newTotal < oldTotal - 1e-3f) {
+				for(size_t k = 0; k < group.size(); k++) {
+					int gi = group[k];
+					for(Object *o : oldObjs[k]) RemoveObject(o);
+					nets[gi].objs.clear();
+					makeObjects(newRes[k], nets[gi].objs);
+					nets[gi].cells = newRes[k].cells;
+					nets[gi].len = newRes[k].len;
+				}
+				changed = true;
+			} else {
+				for(size_t k = 0; k < group.size(); k++)
+					if(newRes[k].ok)
+						delCells(newRes[k].cells);
+				for(size_t k = 0; k < group.size(); k++) {
+					int gi = group[k];
+					for(auto &cs : oldCells[k]) { addObst(cnt[cs.second], cs.first, +1); owner[cs.second][cs.first] = gi; }
+					nets[gi].cells = oldCells[k];      // objects untouched, still on board
+				}
 			}
 		}
 		if(!changed)
