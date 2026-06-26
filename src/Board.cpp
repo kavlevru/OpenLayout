@@ -9,6 +9,7 @@
 #include <functional>
 #include <cfloat>
 #include <cmath>
+#include <map>
 
 Board::Board(const char *_name, Type type, Vec2 innerSize, float border, bool originTop) : Board() {
 	objects = nullptr;
@@ -435,24 +436,70 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	if(pitch < minPitch)
 		pitch = minPitch;
 
-	// Collect unique connection pairs first — the first pad anchors the routing
-	// grid so its nodes fall on pad centres (tracks then pass through the
-	// centres instead of running offset beside them).
-	std::vector<std::pair<Pad*, Pad*>> pairs;
-	for(Object *o = objects; o; o = o->GetNext()) {
-		if(!o->IsPad())
+	// Group pads into nets (connected components of the rubber-band graph) so
+	// pads of the SAME net are not treated as obstacles, and route the minimum
+	// spanning tree of each net — i.e. the shortest links between its elements,
+	// which is what the connections actually mean.
+	std::vector<std::pair<Pad*, Pad*>> origPairs;     // raw connections (rubber-bands)
+	std::vector<Pad*> allPads;
+	for(Object *o = objects; o; o = o->GetNext())
+		if(o->IsPad())
+			allPads.push_back((Pad*) o);
+
+	std::map<Pad*, int> netOf;
+	std::vector<std::vector<Pad*>> netPads;
+	for(Pad *p : allPads) {
+		for(uint32_t i = 0; i < p->ConnectionCount(); i++)
+			if(p < p->GetConnection(i))
+				origPairs.push_back({p, p->GetConnection(i)});
+		if(netOf.count(p))
 			continue;
-		Pad *p = (Pad*) o;
-		for(uint32_t i = 0; i < p->ConnectionCount(); i++) {
-			Pad *q = p->GetConnection(i);
-			if(p < q)
-				pairs.push_back({p, q});
+		int nid = netPads.size();
+		std::vector<Pad*> comp, stack = {p};
+		netOf[p] = nid;
+		while(!stack.empty()) {
+			Pad *c = stack.back();
+			stack.pop_back();
+			comp.push_back(c);
+			for(uint32_t i = 0; i < c->ConnectionCount(); i++) {
+				Pad *q = c->GetConnection(i);
+				if(!netOf.count(q)) { netOf[q] = nid; stack.push_back(q); }
+			}
+		}
+		netPads.push_back(comp);
+	}
+
+	struct Edge { Pad *a, *b; int net; };
+	std::vector<Edge> mstEdges;                        // shortest links per net (Prim)
+	for(int nid = 0; nid < (int) netPads.size(); nid++) {
+		std::vector<Pad*> &P = netPads[nid];
+		if(P.size() < 2)
+			continue;
+		std::vector<char> inTree(P.size(), 0);
+		std::vector<float> best(P.size(), FLT_MAX);
+		std::vector<int> from(P.size(), -1);
+		best[0] = 0.0f;
+		for(size_t it = 0; it < P.size(); it++) {
+			int u = -1;
+			float bu = FLT_MAX;
+			for(size_t k = 0; k < P.size(); k++)
+				if(!inTree[k] && best[k] < bu) { bu = best[k]; u = (int) k; }
+			if(u < 0)
+				break;
+			inTree[u] = 1;
+			if(from[u] >= 0)
+				mstEdges.push_back({P[from[u]], P[u], nid});
+			for(size_t k = 0; k < P.size(); k++)
+				if(!inTree[k]) {
+					float d = (P[u]->GetPosition() - P[k]->GetPosition()).Length();
+					if(d < best[k]) { best[k] = d; from[k] = u; }
+				}
 		}
 	}
-	if(pairs.empty())
+	if(mstEdges.empty())
 		return {0, 0};
 
-	Vec2 ref = pairs[0].first->GetPosition();
+	Vec2 ref = mstEdges[0].a->GetPosition();
 	Vec2 off(std::fmod(ref.x, pitch), std::fmod(ref.y, pitch));   // grid node alignment
 
 	auto node   = [&](int c, int r) { return Vec2(off.x + c * pitch, off.y + r * pitch); };
@@ -505,14 +552,16 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	// baseCnt = fixed copper only (no routed nets); owner = which net occupies a
 	// cell (-1 = none). Both drive negotiated rip-up below.
 	std::vector<int> baseCnt[2] = {cnt[0], cnt[1]};
-	std::vector<int> owner[2] = {std::vector<int>(cols * rows, -1),
+	std::vector<int> owner[2] = {std::vector<int>(cols * rows, -1),    // routed edge index
 	                             std::vector<int>(cols * rows, -1)};
+	std::vector<int> cellNet[2] = {std::vector<int>(cols * rows, -1),  // net id at cell
+	                               std::vector<int>(cols * rows, -1)};
 
-	// Route short connections first — long nets otherwise block many later ones.
-	std::sort(pairs.begin(), pairs.end(),
-		[](const std::pair<Pad*, Pad*> &x, const std::pair<Pad*, Pad*> &y) {
-			Vec2 dx = x.first->GetPosition() - x.second->GetPosition();
-			Vec2 dy = y.first->GetPosition() - y.second->GetPosition();
+	// Route short edges first — long ones otherwise block many later ones.
+	std::sort(mstEdges.begin(), mstEdges.end(),
+		[](const Edge &x, const Edge &y) {
+			Vec2 dx = x.a->GetPosition() - x.b->GetPosition();
+			Vec2 dy = y.a->GetPosition() - y.b->GetPosition();
 			return std::abs(dx.x) + std::abs(dx.y) < std::abs(dy.x) + std::abs(dy.y);
 		});
 
@@ -547,7 +596,9 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	};
 
 	// Route a-b against the given obstacle-count grids without mutating state.
-	auto tryRoute = [&](Pad *a, Pad *b, const std::vector<int> *grid) -> Res {
+	// Cells held by same-net copper (pads of this net, or its routed tracks) are
+	// treated as free, so a net never bypasses its own pads.
+	auto tryRoute = [&](Pad *a, Pad *b, const std::vector<int> *grid, int netId) -> Res {
 		Res res;
 		uint8_t startSides = autoroutePadSides(a), goalSides = autoroutePadSides(b);
 		if(!startSides || !goalSides)
@@ -556,13 +607,13 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		std::vector<char> work[2] = {std::vector<char>(cols * rows),
 		                             std::vector<char>(cols * rows)};
 		for(int i = 0; i < cols * rows; i++) {
-			work[0][i] = grid[0][i] > 0;
-			work[1][i] = grid[1][i] > 0;
+			work[0][i] = grid[0][i] > 0 && cellNet[0][i] != netId;
+			work[1][i] = grid[1][i] > 0 && cellNet[1][i] != netId;
 		}
-		// Undo each endpoint pad's contribution (its 3x3 cells + dilation ring)
-		// so the track can leave its own pad.
+		// Free every same-net pad's footprint (3x3 cells + dilation ring) so the
+		// track can leave its own pads and run straight through siblings.
 		float h = pitch * 0.5f;
-		for(Pad *pad : {a, b}) {
+		for(Pad *pad : netPads[netId]) {
 			AABB box = pad->GetAABB();
 			int c0 = clampC(cellX(box.lower.x) - 1), c1 = clampC(cellX(box.upper.x) + 1);
 			int r0 = clampR(cellY(box.lower.y) - 1), r1 = clampR(cellY(box.upper.y) + 1);
@@ -667,17 +718,19 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		return res;
 	};
 
-	// Reserve / release a route's cells on the live grids and owner map.
-	auto addCells = [&](const Res &res, int netIdx) {
+	// Reserve / release a route's cells on the live grids, owner and net maps.
+	auto addCells = [&](const Res &res, int edgeIdx, int netId) {
 		for(auto &cs : res.cells) {
 			addObst(cnt[cs.second], cs.first, +1);
-			owner[cs.second][cs.first] = netIdx;
+			owner[cs.second][cs.first] = edgeIdx;
+			cellNet[cs.second][cs.first] = netId;
 		}
 	};
 	auto delCells = [&](const std::vector<std::pair<int, int>> &cells) {
 		for(auto &cs : cells) {
 			addObst(cnt[cs.second], cs.first, -1);
 			owner[cs.second][cs.first] = -1;
+			cellNet[cs.second][cs.first] = -1;
 		}
 	};
 	auto makeObjects = [&](const Res &res, std::vector<Object*> &objs) {
@@ -695,24 +748,25 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 
 	struct Net {
 		Pad *a, *b;
+		int netId;
 		bool routed = false;
 		float len = 0.0f;
 		std::vector<Object*> objs;
 		std::vector<std::pair<int, int>> cells;
 	};
 	std::vector<Net> nets;
-	for(auto &pr : pairs)
-		nets.push_back({pr.first, pr.second});
+	for(auto &e : mstEdges)
+		nets.push_back({e.a, e.b, e.net});
 
 	int routed = 0, total = nets.size();
 	auto place = [&](int i, const Res &r) {            // commit a fresh route
 		makeObjects(r, nets[i].objs);
-		addCells(r, i);
+		addCells(r, i, nets[i].netId);
 		nets[i].routed = true; nets[i].len = r.len; nets[i].cells = r.cells;
 	};
 
 	for(int i = 0; i < (int) nets.size(); i++) {       // greedy first pass
-		Res r = tryRoute(nets[i].a, nets[i].b, cnt);
+		Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId);
 		if(r.ok) { place(i, r); routed++; }
 	}
 
@@ -723,17 +777,17 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			if(nets[i].routed) {
 				std::vector<std::pair<int, int>> saved = nets[i].cells;
 				delCells(saved);
-				Res r = tryRoute(nets[i].a, nets[i].b, cnt);
+				Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId);
 				if(r.ok && r.len < nets[i].len - 1e-3f) {
 					for(Object *o : nets[i].objs) RemoveObject(o);
 					nets[i].objs.clear();
 					place(i, r);
 					changed = true;
 				} else {
-					for(auto &cs : saved) { addObst(cnt[cs.second], cs.first, +1); owner[cs.second][cs.first] = i; }
+					for(auto &cs : saved) { addObst(cnt[cs.second], cs.first, +1); owner[cs.second][cs.first] = i; cellNet[cs.second][cs.first] = nets[i].netId; }
 				}
 			} else {
-				Res r = tryRoute(nets[i].a, nets[i].b, cnt);
+				Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId);
 				if(r.ok) { place(i, r); routed++; changed = true; }
 			}
 		}
@@ -750,7 +804,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		for(int i = 0; i < (int) nets.size(); i++) {
 			if(!nets[i].routed)
 				continue;
-			Res ideal = tryRoute(nets[i].a, nets[i].b, baseCnt);
+			Res ideal = tryRoute(nets[i].a, nets[i].b, baseCnt, nets[i].netId);
 			if(!ideal.ok || ideal.len >= nets[i].len - 1e-3f)
 				continue;
 
@@ -758,7 +812,8 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			group.push_back(i);
 			for(auto &cs : ideal.cells) {
 				int ow = owner[cs.second][cs.first];
-				if(ow >= 0 && ow != i && std::find(group.begin(), group.end(), ow) == group.end())
+				if(ow >= 0 && nets[ow].netId != nets[i].netId &&
+				   std::find(group.begin(), group.end(), ow) == group.end())
 					group.push_back(ow);
 			}
 			if(group.size() == 1)
@@ -779,9 +834,9 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			float newTotal = 0.0f;
 			std::vector<Res> newRes(group.size());
 			for(size_t k = 0; k < group.size(); k++) {
-				Res r = tryRoute(nets[group[k]].a, nets[group[k]].b, cnt);
+				Res r = tryRoute(nets[group[k]].a, nets[group[k]].b, cnt, nets[group[k]].netId);
 				if(!r.ok) { allOk = false; break; }
-				addCells(r, group[k]);                 // reserve before the next route
+				addCells(r, group[k], nets[group[k]].netId);   // reserve before next route
 				newRes[k] = r;
 				newTotal += r.len;
 			}
@@ -802,7 +857,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 						delCells(newRes[k].cells);
 				for(size_t k = 0; k < group.size(); k++) {
 					int gi = group[k];
-					for(auto &cs : oldCells[k]) { addObst(cnt[cs.second], cs.first, +1); owner[cs.second][cs.first] = gi; }
+					for(auto &cs : oldCells[k]) { addObst(cnt[cs.second], cs.first, +1); owner[cs.second][cs.first] = gi; cellNet[cs.second][cs.first] = nets[gi].netId; }
 					nets[gi].cells = oldCells[k];      // objects untouched, still on board
 				}
 			}
@@ -811,9 +866,14 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			break;
 	}
 
+	// Drop the rubber-bands of every net whose spanning tree fully routed.
+	std::vector<char> netDone(netPads.size(), 1);
 	for(Net &n : nets)
-		if(n.routed)
-			n.a->RemoveConnections(n.b);
+		if(!n.routed)
+			netDone[n.netId] = 0;
+	for(auto &pr : origPairs)
+		if(netDone[netOf[pr.first]])
+			pr.first->RemoveConnections(pr.second);
 
 	return {routed, total};
 }
