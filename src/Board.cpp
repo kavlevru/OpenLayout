@@ -425,9 +425,15 @@ static uint8_t autoroutePadSides(const Pad *p) {
 std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	float clearance = settings.groundDistance;
 	float tw = settings.trackSize;
-	float pitch = tw + 2.0f * clearance;
-	if(pitch < 0.1f)
-		pitch = 0.1f;
+	float minPitch = tw + 2.0f * clearance;       // spacing needed to keep clearance
+	if(minPitch < 0.1f)
+		minPitch = 0.1f;
+	// Prefer the board grid as the routing pitch: pads sit on it, so grid nodes
+	// land on pad centres and tracks run through them. Only fall back to the
+	// minimum spacing if the board grid is finer than that.
+	float pitch = (float) GetGrid();
+	if(pitch < minPitch)
+		pitch = minPitch;
 
 	// Collect unique connection pairs first — the first pad anchors the routing
 	// grid so its nodes fall on pad centres (tracks then pass through the
@@ -536,22 +542,31 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		if(!startSides || !goalSides)
 			continue;
 
-		// Working grids: free both endpoint pads on both sides, including the
-		// one-cell clearance ring the base grid dilated around them — otherwise
-		// the track cannot leave its own pad.
+		// Working grids: undo exactly what each endpoint pad contributed to the
+		// base grid — its 3x3-sampled cells AND their dilation ring — so the
+		// track can leave its own pad. (A plain radius missed the outer dilated
+		// ring and trapped the route inside the pad.)
 		std::vector<char> work[2] = {obst[0], obst[1]};
 		for(Pad *pad : {a, b}) {
-			Vec2 pc = pad->GetPosition();
 			AABB box = pad->GetAABB();
-			float clearR = 0.5f * std::max(box.Width(), box.Height()) + pitch;
-			int c0 = clampC(cellX(box.lower.x) - 2), c1 = clampC(cellX(box.upper.x) + 2);
-			int r0 = clampR(cellY(box.lower.y) - 2), r1 = clampR(cellY(box.upper.y) + 2);
+			int c0 = clampC(cellX(box.lower.x) - 1), c1 = clampC(cellX(box.upper.x) + 1);
+			int r0 = clampR(cellY(box.lower.y) - 1), r1 = clampR(cellY(box.upper.y) + 1);
+			float h = pitch * 0.5f;
 			for(int r = r0; r <= r1; r++)
-				for(int c = c0; c <= c1; c++)
-					if((node(c, r) - pc).Length() <= clearR) {
-						work[0][idx(c, r)] = 0;
-						work[1][idx(c, r)] = 0;
-					}
+				for(int c = c0; c <= c1; c++) {
+					Vec2 n = node(c, r);
+					bool hit = false;
+					for(int sy = -1; sy <= 1 && !hit; sy++)
+						for(int sx = -1; sx <= 1 && !hit; sx++)
+							if(pad->TestPoint(n + Vec2(sx * h, sy * h)))
+								hit = true;
+					if(hit)
+						for(int ddr = -1; ddr <= 1; ddr++)
+							for(int ddc = -1; ddc <= 1; ddc++) {
+								work[0][idx(clampC(c + ddc), clampR(r + ddr))] = 0;
+								work[1][idx(clampC(c + ddc), clampR(r + ddr))] = 0;
+							}
+				}
 		}
 
 		int sc = clampC(cellX(a->GetPosition().x)), sr = clampR(cellY(a->GetPosition().y));
