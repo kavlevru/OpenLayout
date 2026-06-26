@@ -466,18 +466,20 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	auto idx    = [&](int c, int r) { return r * cols + c; };
 	auto clampC = [&](int c) { return c < 0 ? 0 : (c >= cols ? cols - 1 : c); };
 	auto clampR = [&](int r) { return r < 0 ? 0 : (r >= rows ? rows - 1 : r); };
-	auto blockCell = [&](std::vector<char> &g, int cell) {
+
+	// Per-side obstacle COUNT grids (cell blocked if > 0). Counts (rather than
+	// flags) let rip-up add/remove a single net's cells cheaply. Each marked
+	// cell is dilated by one ring for clearance.
+	auto addObst = [&](std::vector<int> &g, int cell, int delta) {
 		int cc = cell % cols, cr = cell / cols;
 		for(int ddr = -1; ddr <= 1; ddr++)
 			for(int ddc = -1; ddc <= 1; ddc++)
-				g[idx(clampC(cc + ddc), clampR(cr + ddr))] = 1;
+				g[idx(clampC(cc + ddc), clampR(cr + ddr))] += delta;
 	};
 
-	// Per-side obstacle grids (dilated for clearance): side 0 = top, 1 = bottom.
-	std::vector<char> obst[2] = {std::vector<char>(cols * rows, 0),
-	                             std::vector<char>(cols * rows, 0)};
-	for(int side = 0; side < 2; side++) {
-		std::vector<char> base(cols * rows, 0);
+	std::vector<int> cnt[2] = {std::vector<int>(cols * rows, 0),
+	                           std::vector<int>(cols * rows, 0)};
+	for(int side = 0; side < 2; side++)
 		for(Object *o = objects; o; o = o->GetNext()) {
 			if(!autorouteBlocks(o, side))
 				continue;
@@ -496,14 +498,9 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 							if(o->TestPoint(n + Vec2(sx * h, sy * h)))
 								hit = true;
 					if(hit)
-						base[idx(c, r)] = 1;
+						addObst(cnt[side], idx(c, r), +1);
 				}
 		}
-		for(int r = 0; r < rows; r++)
-			for(int c = 0; c < cols; c++)
-				if(base[idx(c, r)])
-					blockCell(obst[side], idx(c, r));
-	}
 
 	// Route short connections first — long nets otherwise block many later ones.
 	std::sort(pairs.begin(), pairs.end(),
@@ -513,12 +510,10 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			return std::abs(dx.x) + std::abs(dx.y) < std::abs(dy.x) + std::abs(dy.y);
 		});
 
-	int routed = 0, total = pairs.size();
 	const int dc[4] = {1, -1, 0, 0}, dr[4] = {0, 0, 1, -1};
 	const float bend = 2.0f;                      // turn penalty, in cell steps
 	const float viaCost = 12.0f;                  // cost of switching sides
-	// state = (cell * 2 + side) * 5 + incoming dir (4 = none)
-	int nStates = cols * rows * 2 * 5;
+	int nStates = cols * rows * 2 * 5;            // (cell * 2 + side) * 5 + dir
 	std::vector<float> dist(nStates);
 	std::vector<int> prev(nStates);
 
@@ -536,22 +531,35 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		return s;
 	};
 
-	for(auto &pr : pairs) {
-		Pad *a = pr.first, *b = pr.second;
+	// A computed route, not yet committed to the board.
+	struct Res {
+		bool ok = false;
+		float len = 0.0f;
+		std::vector<std::pair<int, int>> cells;                 // (cell, side)
+		std::vector<std::pair<int, std::vector<Vec2>>> tracks;  // (layer, points)
+		std::vector<Vec2> vias;
+	};
+
+	// Route a-b on the current obstacle counts without mutating any state.
+	auto tryRoute = [&](Pad *a, Pad *b) -> Res {
+		Res res;
 		uint8_t startSides = autoroutePadSides(a), goalSides = autoroutePadSides(b);
 		if(!startSides || !goalSides)
-			continue;
+			return res;
 
-		// Working grids: undo exactly what each endpoint pad contributed to the
-		// base grid — its 3x3-sampled cells AND their dilation ring — so the
-		// track can leave its own pad. (A plain radius missed the outer dilated
-		// ring and trapped the route inside the pad.)
-		std::vector<char> work[2] = {obst[0], obst[1]};
+		std::vector<char> work[2] = {std::vector<char>(cols * rows),
+		                             std::vector<char>(cols * rows)};
+		for(int i = 0; i < cols * rows; i++) {
+			work[0][i] = cnt[0][i] > 0;
+			work[1][i] = cnt[1][i] > 0;
+		}
+		// Undo each endpoint pad's contribution (its 3x3 cells + dilation ring)
+		// so the track can leave its own pad.
+		float h = pitch * 0.5f;
 		for(Pad *pad : {a, b}) {
 			AABB box = pad->GetAABB();
 			int c0 = clampC(cellX(box.lower.x) - 1), c1 = clampC(cellX(box.upper.x) + 1);
 			int r0 = clampR(cellY(box.lower.y) - 1), r1 = clampR(cellY(box.upper.y) + 1);
-			float h = pitch * 0.5f;
 			for(int r = r0; r <= r1; r++)
 				for(int c = c0; c <= c1; c++) {
 					Vec2 n = node(c, r);
@@ -576,16 +584,13 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		work[0][goalCell]  = work[1][goalCell]  = 0;
 
 		auto stateOf = [&](int cell, int side, int dir) { return (cell * 2 + side) * 5 + dir; };
-
 		std::fill(dist.begin(), dist.end(), FLT_MAX);
 		std::priority_queue<std::pair<float, int>, std::vector<std::pair<float, int>>,
 		                    std::greater<std::pair<float, int>>> pq;
 		for(int side = 0; side < 2; side++)
 			if((startSides >> side) & 1) {
 				int st = stateOf(startCell, side, 4);
-				dist[st] = 0.0f;
-				prev[st] = -1;
-				pq.push({0.0f, st});
+				dist[st] = 0.0f; prev[st] = -1; pq.push({0.0f, st});
 			}
 		int goalState = -1;
 		while(!pq.empty()) {
@@ -597,7 +602,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			int dir = state % 5, tmp = state / 5, side = tmp % 2, cell = tmp / 2;
 			if(cell == goalCell && ((goalSides >> side) & 1)) { goalState = state; break; }
 			int cc = cell % cols, cr = cell / cols;
-			for(int k = 0; k < 4; k++) {            // planar moves on the current side
+			for(int k = 0; k < 4; k++) {
 				int nc = cc + dc[k], nr = cr + dr[k];
 				if(nc < 0 || nc >= cols || nr < 0 || nr >= rows)
 					continue;
@@ -606,33 +611,22 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 					continue;
 				float ncost = cost + 1.0f + ((dir != 4 && dir != k) ? bend : 0.0f);
 				int nstate = stateOf(ncell, side, k);
-				if(ncost < dist[nstate]) {
-					dist[nstate] = ncost;
-					prev[nstate] = state;
-					pq.push({ncost, nstate});
-				}
+				if(ncost < dist[nstate]) { dist[nstate] = ncost; prev[nstate] = state; pq.push({ncost, nstate}); }
 			}
-			if(!work[0][cell] && !work[1][cell]) {  // via: switch side if free on both
+			if(!work[0][cell] && !work[1][cell]) {
 				int nstate = stateOf(cell, 1 - side, 4);
 				float ncost = cost + viaCost;
-				if(ncost < dist[nstate]) {
-					dist[nstate] = ncost;
-					prev[nstate] = state;
-					pq.push({ncost, nstate});
-				}
+				if(ncost < dist[nstate]) { dist[nstate] = ncost; prev[nstate] = state; pq.push({ncost, nstate}); }
 			}
 		}
 		if(goalState < 0)
-			continue;
+			return res;
 
-		// Backtrace into a (cell, side) path, start -> goal.
-		std::vector<std::pair<int, int>> path;       // {cell, side}
+		std::vector<std::pair<int, int>> path;
 		for(int s = goalState; s != -1; s = prev[s])
 			path.push_back({(s / 5) / 2, (s / 5) % 2});
 		std::reverse(path.begin(), path.end());
 
-		// Emit one track per same-side run, with a via pad at each side change.
-		std::vector<Vec2> viaPositions;
 		bool madeTrack = false, first = true;
 		size_t i = 0;
 		while(i < path.size()) {
@@ -650,29 +644,89 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 				run.push_back(b->GetPosition());
 			std::vector<Vec2> simple = simplify(run);
 			if(simple.size() >= 2) {
-				AddObjectEnd(new Track(autorouteSideLayer(side), clearance, tw,
-				                       simple.data(), simple.size()));
+				for(size_t k = 0; k + 1 < simple.size(); k++)
+					res.len += (simple[k + 1] - simple[k]).Length();
+				res.tracks.push_back({autorouteSideLayer(side), simple});
 				madeTrack = true;
 			}
 			if(!last)
-				viaPositions.push_back(node(path[j].first % cols, path[j].first / cols));
+				res.vias.push_back(node(path[j].first % cols, path[j].first / cols));
 			first = false;
 			i = j;
 		}
 		if(!madeTrack)
-			continue;
+			return res;
+		res.cells = path;
+		res.ok = true;
+		return res;
+	};
 
-		for(const Vec2 &vp : viaPositions)
-			AddObjectEnd(new THTPad((uint8_t) LAYER_C1, clearance, vp,
-			                        settings.padSize, settings.padShape, true));
+	// Commit a route: add its objects to the board and its cells to the grids.
+	auto commit = [&](const Res &res, std::vector<Object*> &objs) {
+		for(auto &t : res.tracks) {
+			Track *trk = new Track((uint8_t) t.first, clearance, tw, t.second.data(), t.second.size());
+			AddObjectEnd(trk);
+			objs.push_back(trk);
+		}
+		for(const Vec2 &vp : res.vias) {
+			THTPad *via = new THTPad((uint8_t) LAYER_C1, clearance, vp, settings.padSize, settings.padShape, true);
+			AddObjectEnd(via);
+			objs.push_back(via);
+		}
+		for(auto &cs : res.cells)
+			addObst(cnt[cs.second], cs.first, +1);
+	};
 
-		// Mark routed cells (dilated) as obstacles on their side for later nets.
-		for(auto &cs : path)
-			blockCell(obst[cs.second], cs.first);
+	struct Net {
+		Pad *a, *b;
+		bool routed = false;
+		float len = 0.0f;
+		std::vector<Object*> objs;
+		std::vector<std::pair<int, int>> cells;
+	};
+	std::vector<Net> nets;
+	for(auto &pr : pairs)
+		nets.push_back({pr.first, pr.second});
 
-		a->RemoveConnections(b);   // rip the rubber-band; removes both directions
-		routed++;
+	int routed = 0, total = nets.size();
+	for(Net &n : nets) {                                // greedy first pass
+		Res r = tryRoute(n.a, n.b);
+		if(r.ok) { commit(r, n.objs); n.routed = true; n.len = r.len; n.cells = r.cells; routed++; }
 	}
+
+	// Rip-up & reroute: free a net's cells, reroute it (keep only if strictly
+	// shorter), and retry unrouted nets now that some space may be free.
+	for(int pass = 0; pass < 3; pass++) {
+		bool changed = false;
+		for(Net &n : nets) {
+			if(n.routed) {
+				for(auto &cs : n.cells)
+					addObst(cnt[cs.second], cs.first, -1);
+				Res r = tryRoute(n.a, n.b);
+				if(r.ok && r.len < n.len - 1e-3f) {
+					for(Object *o : n.objs)
+						RemoveObject(o);
+					n.objs.clear();
+					commit(r, n.objs);
+					n.len = r.len; n.cells = r.cells;
+					changed = true;
+				} else {
+					for(auto &cs : n.cells)        // keep the existing route
+						addObst(cnt[cs.second], cs.first, +1);
+				}
+			} else {
+				Res r = tryRoute(n.a, n.b);
+				if(r.ok) { commit(r, n.objs); n.routed = true; n.len = r.len; n.cells = r.cells; routed++; changed = true; }
+			}
+		}
+		if(!changed)
+			break;
+	}
+
+	for(Net &n : nets)
+		if(n.routed)
+			n.a->RemoveConnections(n.b);
+
 	return {routed, total};
 }
 

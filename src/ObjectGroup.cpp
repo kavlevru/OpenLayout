@@ -90,6 +90,15 @@ void ObjectGroup::AddObjectBegin(Object *object) {
 		objects->prev = object;
 	objects = object;
 }
+void ObjectGroup::RemoveObject(Object *object) {
+	if(object->next)
+		object->next->prev = object->prev;
+	if(object->prev)
+		object->prev->next = object->next;
+	else
+		objects = object->next;
+	delete object;
+}
 
 void ObjectGroup::PlaceObject(Object *object) {
 	object->SetPlaced();

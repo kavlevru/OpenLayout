@@ -12,6 +12,7 @@ public:
 	void AddObjectBegin(Object *object);
 	void AddObjectEnd(Object *object);
 	Object *AddObjectEnd(Object *object, Object *last);
+	void RemoveObject(Object *object);   // unlink and delete a single object
 
 	void PlaceObject(Object *object);
 	void PlaceGroup(const ObjectGroup &group, const Vec2 &position);
