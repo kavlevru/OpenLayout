@@ -478,10 +478,20 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			AABB box = o->GetAABB();
 			int c0 = clampC(cellX(box.lower.x) - 1), c1 = clampC(cellX(box.upper.x) + 1);
 			int r0 = clampR(cellY(box.lower.y) - 1), r1 = clampR(cellY(box.upper.y) + 1);
+			float h = pitch * 0.5f;
 			for(int r = r0; r <= r1; r++)
-				for(int c = c0; c <= c1; c++)
-					if(o->TestPoint(node(c, r)))
+				for(int c = c0; c <= c1; c++) {
+					Vec2 n = node(c, r);
+					// Sample a 3x3 grid inside the cell so thin obstacles (a track
+					// passing between node columns) are not missed.
+					bool hit = false;
+					for(int sy = -1; sy <= 1 && !hit; sy++)
+						for(int sx = -1; sx <= 1 && !hit; sx++)
+							if(o->TestPoint(n + Vec2(sx * h, sy * h)))
+								hit = true;
+					if(hit)
 						base[idx(c, r)] = 1;
+				}
 		}
 		for(int r = 0; r < rows; r++)
 			for(int c = 0; c < cols; c++)
@@ -526,15 +536,19 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		if(!startSides || !goalSides)
 			continue;
 
-		// Working grids: free both endpoint pads' footprints on both sides.
+		// Working grids: free both endpoint pads on both sides, including the
+		// one-cell clearance ring the base grid dilated around them — otherwise
+		// the track cannot leave its own pad.
 		std::vector<char> work[2] = {obst[0], obst[1]};
 		for(Pad *pad : {a, b}) {
+			Vec2 pc = pad->GetPosition();
 			AABB box = pad->GetAABB();
-			int c0 = clampC(cellX(box.lower.x) - 1), c1 = clampC(cellX(box.upper.x) + 1);
-			int r0 = clampR(cellY(box.lower.y) - 1), r1 = clampR(cellY(box.upper.y) + 1);
+			float clearR = 0.5f * std::max(box.Width(), box.Height()) + pitch;
+			int c0 = clampC(cellX(box.lower.x) - 2), c1 = clampC(cellX(box.upper.x) + 2);
+			int r0 = clampR(cellY(box.lower.y) - 2), r1 = clampR(cellY(box.upper.y) + 2);
 			for(int r = r0; r <= r1; r++)
 				for(int c = c0; c <= c1; c++)
-					if(pad->TestPoint(node(c, r))) {
+					if((node(c, r) - pc).Length() <= clearR) {
 						work[0][idx(c, r)] = 0;
 						work[1][idx(c, r)] = 0;
 					}
