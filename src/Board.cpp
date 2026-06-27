@@ -431,15 +431,16 @@ static uint8_t autoroutePadSides(const Pad *p) {
 std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	float clearance = settings.groundDistance;
 	float tw = settings.trackSize;
-	float minPitch = tw + 2.0f * clearance;       // spacing needed to keep clearance
-	if(minPitch < 0.1f)
-		minPitch = 0.1f;
-	// Prefer the board grid as the routing pitch: pads sit on it, so grid nodes
-	// land on pad centres and tracks run through them. Only fall back to the
-	// minimum spacing if the board grid is finer than that.
+	// Always route on the board grid so pad centres land on grid nodes (tracks
+	// run straight through them). Clearance is held by DILATING obstacles by as
+	// many cells as needed, not by widening the pitch (which would knock pads
+	// off the grid and make tracks hop around them).
 	float pitch = (float) GetGrid();
-	if(pitch < minPitch)
-		pitch = minPitch;
+	if(pitch < 0.1f)
+		pitch = 0.1f;
+	int dil = (int) std::ceil((tw + clearance) / pitch) - 1;   // dilation radius, cells
+	if(dil < 1)
+		dil = 1;
 
 	// Group pads into nets (connected components of the rubber-band graph) so
 	// pads of the SAME net are not treated as obstacles, and route the minimum
@@ -524,8 +525,8 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	// cell is dilated by one ring for clearance.
 	auto addObst = [&](std::vector<int> &g, int cell, int delta) {
 		int cc = cell % cols, cr = cell / cols;
-		for(int ddr = -1; ddr <= 1; ddr++)
-			for(int ddc = -1; ddc <= 1; ddc++)
+		for(int ddr = -dil; ddr <= dil; ddr++)
+			for(int ddc = -dil; ddc <= dil; ddc++)
 				g[idx(clampC(cc + ddc), clampR(cr + ddr))] += delta;
 	};
 
@@ -631,8 +632,8 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 							if(pad->TestPoint(n + Vec2(sx * h, sy * h)))
 								hit = true;
 					if(hit)
-						for(int ddr = -1; ddr <= 1; ddr++)
-							for(int ddc = -1; ddc <= 1; ddc++) {
+						for(int ddr = -dil; ddr <= dil; ddr++)
+							for(int ddc = -dil; ddc <= dil; ddc++) {
 								work[0][idx(clampC(c + ddc), clampR(r + ddr))] = 0;
 								work[1][idx(clampC(c + ddc), clampR(r + ddr))] = 0;
 							}
