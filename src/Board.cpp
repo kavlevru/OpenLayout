@@ -413,6 +413,11 @@ static bool autorouteBlocks(const Object *o, int side) {
 	return o->GetLayer() == autorouteSideLayer(side);
 }
 
+// Preferred routing side for a pad: the copper side it sits on (C2 -> bottom).
+static int autoroutePrefSide(const Pad *p) {
+	return p->GetLayer() == ObjectGroup::LAYER_C2 ? 1 : 0;
+}
+
 // Sides a pad can be routed on: bit0 = top, bit1 = bottom.
 static uint8_t autoroutePadSides(const Pad *p) {
 	if(p->GetType() == Object::THT_PAD)
@@ -598,7 +603,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	// Route a-b against the given obstacle-count grids without mutating state.
 	// Cells held by same-net copper (pads of this net, or its routed tracks) are
 	// treated as free, so a net never bypasses its own pads.
-	auto tryRoute = [&](Pad *a, Pad *b, const std::vector<int> *grid, int netId) -> Res {
+	auto tryRoute = [&](Pad *a, Pad *b, const std::vector<int> *grid, int netId, int prefSide) -> Res {
 		Res res;
 		uint8_t startSides = autoroutePadSides(a), goalSides = autoroutePadSides(b);
 		if(!startSides || !goalSides)
@@ -647,7 +652,8 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		for(int side = 0; side < 2; side++)
 			if((startSides >> side) & 1) {
 				int st = stateOf(startCell, side, 4);
-				dist[st] = 0.0f; prev[st] = -1; pq.push({0.0f, st});
+				float c0 = (side == prefSide) ? 0.0f : 0.5f;   // bias to the pads' side
+				dist[st] = c0; prev[st] = -1; pq.push({c0, st});
 			}
 		int goalState = -1;
 		while(!pq.empty()) {
@@ -766,7 +772,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	};
 
 	for(int i = 0; i < (int) nets.size(); i++) {       // greedy first pass
-		Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId);
+		Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId, autoroutePrefSide(nets[i].a));
 		if(r.ok) { place(i, r); routed++; }
 	}
 
@@ -777,7 +783,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			if(nets[i].routed) {
 				std::vector<std::pair<int, int>> saved = nets[i].cells;
 				delCells(saved);
-				Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId);
+				Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId, autoroutePrefSide(nets[i].a));
 				if(r.ok && r.len < nets[i].len - 1e-3f) {
 					for(Object *o : nets[i].objs) RemoveObject(o);
 					nets[i].objs.clear();
@@ -787,7 +793,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 					for(auto &cs : saved) { addObst(cnt[cs.second], cs.first, +1); owner[cs.second][cs.first] = i; cellNet[cs.second][cs.first] = nets[i].netId; }
 				}
 			} else {
-				Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId);
+				Res r = tryRoute(nets[i].a, nets[i].b, cnt, nets[i].netId, autoroutePrefSide(nets[i].a));
 				if(r.ok) { place(i, r); routed++; changed = true; }
 			}
 		}
@@ -804,7 +810,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		for(int i = 0; i < (int) nets.size(); i++) {
 			if(!nets[i].routed)
 				continue;
-			Res ideal = tryRoute(nets[i].a, nets[i].b, baseCnt, nets[i].netId);
+			Res ideal = tryRoute(nets[i].a, nets[i].b, baseCnt, nets[i].netId, autoroutePrefSide(nets[i].a));
 			if(!ideal.ok || ideal.len >= nets[i].len - 1e-3f)
 				continue;
 
@@ -834,7 +840,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 			float newTotal = 0.0f;
 			std::vector<Res> newRes(group.size());
 			for(size_t k = 0; k < group.size(); k++) {
-				Res r = tryRoute(nets[group[k]].a, nets[group[k]].b, cnt, nets[group[k]].netId);
+				Res r = tryRoute(nets[group[k]].a, nets[group[k]].b, cnt, nets[group[k]].netId, autoroutePrefSide(nets[group[k]].a));
 				if(!r.ok) { allOk = false; break; }
 				addCells(r, group[k], nets[group[k]].netId);   // reserve before next route
 				newRes[k] = r;
