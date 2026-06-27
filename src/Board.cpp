@@ -442,6 +442,10 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	if(dil < 1)
 		dil = 1;
 
+	// Single-sided boards route on one copper side with no vias; multilayer
+	// boards may use both C1/C2 with through-pad vias.
+	bool twoSided = IsMultilayer();
+
 	// Group pads into nets (connected components of the rubber-band graph) so
 	// pads of the SAME net are not treated as obstacles, and route the minimum
 	// spanning tree of each net — i.e. the shortest links between its elements,
@@ -652,6 +656,8 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 		                    std::greater<std::pair<float, int>>> pq;
 		for(int side = 0; side < 2; side++)
 			if((startSides >> side) & 1) {
+				if(!twoSided && side != prefSide)
+					continue;                                  // single-sided: pads' side only
 				int st = stateOf(startCell, side, 4);
 				float c0 = (side == prefSide) ? 0.0f : 0.5f;   // bias to the pads' side
 				dist[st] = c0; prev[st] = -1; pq.push({c0, st});
@@ -677,7 +683,7 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 				int nstate = stateOf(ncell, side, k);
 				if(ncost < dist[nstate]) { dist[nstate] = ncost; prev[nstate] = state; pq.push({ncost, nstate}); }
 			}
-			if(!work[0][cell] && !work[1][cell]) {
+			if(twoSided && !work[0][cell] && !work[1][cell]) {
 				int nstate = stateOf(cell, 1 - side, 4);
 				float ncost = cost + viaCost;
 				if(ncost < dist[nstate]) { dist[nstate] = ncost; prev[nstate] = state; pq.push({ncost, nstate}); }
