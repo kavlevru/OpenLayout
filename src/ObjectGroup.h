@@ -1,6 +1,9 @@
 #pragma once
 #include "Object.h"
 #include "ColorScheme.h"
+#include <vector>
+#include <string>
+#include <utility>
 
 class ObjectGroup {
 public:
@@ -55,6 +58,7 @@ public:
 	void ChangeSide(float mirrorX);         // flip to the other board side
 	void ResetSoldermask();                 // clear the soldermask flag on all objects
 	void SelectConnected(Object *start);    // select the copper net touching `start` (continuity test)
+	std::vector<std::pair<Vec2, std::string>> CheckDRC(float clearance) const;  // {position, message}
 	void ToggleSoldermask(Object *object);  // include/exclude one object from the solder mask
 	void DrawSoldermaskMarked() const;      // overlay objects flagged for the solder mask
 	void SetSelectedWidth(float width);     // set line width on the selected objects

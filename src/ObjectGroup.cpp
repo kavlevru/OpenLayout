@@ -8,6 +8,7 @@
 #include <vector>
 #include <cfloat>
 #include <algorithm>
+#include <map>
 
 ObjectGroup::ObjectGroup(const ObjectGroup &other) {
 	Object *last = nullptr;
@@ -340,6 +341,91 @@ static bool objectsConnect(const Object *a, const Object *b) {
 				if(utils::IntersectTwoLines(pa[i], pa[i + 1], pb[j], pb[j + 1]))
 					return true;
 	return false;
+}
+
+// Edge-to-edge gap between two copper outlines (negative if they overlap).
+static float copperEdgeGap(const Object *a, const Object *b) {
+	std::vector<Vec2> pa, pb;
+	float ha, hb;
+	shapeOf(a, pa, ha);
+	shapeOf(b, pb, hb);
+	float best = FLT_MAX;
+	for(size_t i = 0; i < pa.size(); i++) {
+		if(pb.size() == 1)
+			best = std::min(best, (pa[i] - pb[0]).Length());
+		else for(size_t j = 0; j + 1 < pb.size(); j++)
+			best = std::min(best, pointSeg(pa[i], pb[j], pb[j + 1]));
+	}
+	for(size_t i = 0; i < pb.size(); i++) {
+		if(pa.size() == 1)
+			best = std::min(best, (pb[i] - pa[0]).Length());
+		else for(size_t j = 0; j + 1 < pa.size(); j++)
+			best = std::min(best, pointSeg(pb[i], pa[j], pa[j + 1]));
+	}
+	if(pa.size() > 1 && pb.size() > 1)
+		for(size_t i = 0; i + 1 < pa.size(); i++)
+			for(size_t j = 0; j + 1 < pb.size(); j++)
+				if(utils::IntersectTwoLines(pa[i], pa[i + 1], pb[j], pb[j + 1]))
+					best = 0.0f;
+	return best - ha - hb;
+}
+
+std::vector<std::pair<Vec2, std::string>> ObjectGroup::CheckDRC(float clearance) const {
+	std::vector<std::pair<Vec2, std::string>> issues;
+
+	// Collect copper objects and flood them into nets by physical copper touch.
+	std::vector<Object*> cop;
+	for(Object *o = objects; o; o = o->next)
+		if(copperMask(o))
+			cop.push_back(o);
+	std::map<Object*, int> net;
+	int nid = 0;
+	for(Object *s : cop) {
+		if(net.count(s))
+			continue;
+		std::vector<Object*> st = {s};
+		net[s] = nid;
+		while(!st.empty()) {
+			Object *x = st.back();
+			st.pop_back();
+			for(Object *y : cop)
+				if(!net.count(y) && objectsConnect(x, y)) {
+					net[y] = nid;
+					st.push_back(y);
+				}
+		}
+		nid++;
+	}
+
+	// Clearance: copper of different nets closer than the minimum gap.
+	for(size_t i = 0; i < cop.size(); i++)
+		for(size_t j = i + 1; j < cop.size(); j++) {
+			Object *a = cop[i], *b = cop[j];
+			if(!(copperMask(a) & copperMask(b)) || net[a] == net[b])
+				continue;
+			AABB box = a->GetAABB();
+			if(!box.Expand(clearance).TestOverlap(b->GetAABB()))
+				continue;
+			float gap = copperEdgeGap(a, b);
+			if(gap < clearance - 1e-3f)
+				issues.push_back({(a->GetPosition() + b->GetPosition()) * 0.5f,
+					gap < 0.0f ? "Copper overlap (short) between nets"
+					           : "Clearance below minimum between nets"});
+		}
+
+	// Unrouted: a rubber-band whose pads are not joined by copper.
+	for(Object *o : cop)
+		if(o->IsPad()) {
+			Pad *p = (Pad*) o;
+			for(uint32_t k = 0; k < p->ConnectionCount(); k++) {
+				Pad *q = p->GetConnection(k);
+				if(p < q && net.count(p) && net.count(q) && net[p] != net[q])
+					issues.push_back({(p->GetPosition() + q->GetPosition()) * 0.5f,
+						"Unrouted connection"});
+			}
+		}
+
+	return issues;
 }
 
 void ObjectGroup::SelectConnected(Object *start) {

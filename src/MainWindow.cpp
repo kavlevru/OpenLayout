@@ -542,6 +542,24 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(resetMaskAct, &QAction::triggered, this,
             editUndo([](Board *b){ b->ResetSoldermask(); }));
 
+    // DRC: report copper-clearance violations and unrouted connections.
+    connect(panelDrcAct, &QAction::triggered, this, [this](){
+        auto issues = pcb.GetSelectedBoard()->CheckDRC(settings.groundDistance);
+        if(issues.empty()) {
+            QMessageBox::information(this, _("DRC"), _("No design-rule violations found."));
+            return;
+        }
+        QString text = QString(_("%1 issue(s) found:\n\n")).arg((int) issues.size());
+        int shown = 0;
+        for(const auto &is : issues) {
+            if(shown++ >= 40) { text += "…\n"; break; }
+            text += QString("• %1  @ (%2, %3)\n")
+                .arg(QString::fromStdString(is.second))
+                .arg(is.first.x, 0, 'f', 2).arg(is.first.y, 0, 'f', 2);
+        }
+        QMessageBox::warning(this, _("DRC"), text);
+    });
+
     // List drillings: summarise the through holes by diameter.
     connect(listDrillingsAct, &QAction::triggered, this, [this](){
         std::map<int, int> counts;
