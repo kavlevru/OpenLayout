@@ -502,9 +502,8 @@ void ObjectGroup::FillZone(Object *zone, float clearance, float lineWidth) {
 	auto emitRun = [&](const Vec2 &a, const Vec2 &b) {
 		Vec2 pts[2] = {a, b};
 		Track *t = new Track(layer, clearance, lineWidth, pts, 2);
-		t->groups.Add(grp);
-		t->SetPlaced();
-		AddObjectEnd(t);
+		t->groups.Add(grp);          // grouped so the pour selects/deletes as one
+		AddObjectEnd(t);             // permanent (not SetPlaced -> not a temporary)
 	};
 
 	for(float y = box.lower.y; y <= box.upper.y; y += s) {
