@@ -428,7 +428,7 @@ static uint8_t autoroutePadSides(const Pad *p) {
 	return 0;
 }
 
-std::pair<int, int> Board::Autoroute(const Settings &settings) {
+std::pair<int, int> Board::Autoroute(const Settings &settings, bool twoSided) {
 	float clearance = settings.groundDistance;
 	float tw = settings.trackSize;
 	// Always route on the board grid so pad centres land on grid nodes (tracks
@@ -442,9 +442,6 @@ std::pair<int, int> Board::Autoroute(const Settings &settings) {
 	if(dil < 1)
 		dil = 1;
 
-	// Single-sided boards route on one copper side with no vias; multilayer
-	// boards may use both C1/C2 with through-pad vias.
-	bool twoSided = IsMultilayer();
 
 	// Group pads into nets (connected components of the rubber-band graph) so
 	// pads of the SAME net are not treated as obstacles, and route the minimum

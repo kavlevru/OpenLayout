@@ -48,7 +48,7 @@ public:
 
 	// Single-layer maze (Lee) autorouter for pad rubber-band connections.
 	// Returns {routed, total}; routed connections become tracks and are dropped.
-	std::pair<int, int> Autoroute(const Settings &settings);
+	std::pair<int, int> Autoroute(const Settings &settings, bool twoSided);
 
 	double GetGrid() const;
 	void SetGrid(double grid);

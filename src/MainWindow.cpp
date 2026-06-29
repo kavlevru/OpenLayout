@@ -166,16 +166,41 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         }
     });
 
-    // The Autoroute tool runs the maze router once over the board's rubber-band
-    // connections, then drops back to Edit.
+    // The Autoroute tool asks for track width / clearance / sides, runs the
+    // maze router once over the board's rubber-band connections, then drops
+    // back to Edit.
     connect(toolPanel, &ToolPanel::ToolChanged, this, [this]{
         if(settings.selectedTool != TOOL_AUTOROUTE)
             return;
-        PushUndo();
-        std::pair<int, int> r = pcb.GetSelectedBoard()->Autoroute(settings);
-        mainCanvas->update();
-        statusBar()->showMessage(QString(_("Autorouted %1 of %2 connections"))
-            .arg(r.first).arg(r.second));
+        Board *b = pcb.GetSelectedBoard();
+        QDialog dlg(this);
+        dlg.setWindowTitle(_("Autoroute"));
+        QDoubleSpinBox *tw = new QDoubleSpinBox(&dlg);
+        tw->setRange(0.05, 10.0); tw->setSingleStep(0.05); tw->setValue(settings.trackSize);
+        QDoubleSpinBox *cl = new QDoubleSpinBox(&dlg);
+        cl->setRange(0.05, 10.0); cl->setSingleStep(0.05); cl->setValue(settings.groundDistance);
+        QCheckBox *both = new QCheckBox(_("Use both sides (vias)"), &dlg);
+        both->setChecked(b->IsMultilayer());
+        QDialogButtonBox *bb =
+            new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        QFormLayout *form = new QFormLayout(&dlg);
+        form->addRow(_("Track width (mm):"), tw);
+        form->addRow(_("Clearance (mm):"),   cl);
+        form->addRow(QString(), both);
+        form->addRow(bb);
+
+        if(dlg.exec() == QDialog::Accepted) {
+            Settings rs = settings;
+            rs.trackSize = tw->value();
+            rs.groundDistance = cl->value();
+            PushUndo();
+            std::pair<int, int> r = b->Autoroute(rs, both->isChecked());
+            mainCanvas->update();
+            statusBar()->showMessage(QString(_("Autorouted %1 of %2 connections"))
+                .arg(r.first).arg(r.second));
+        }
         toolPanel->OnToolChanged(TOOL_EDIT);
     });
 
