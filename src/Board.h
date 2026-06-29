@@ -55,6 +55,7 @@ public:
 	void UpdateGrid(bool shift, bool ctrl);
 	void SnapSelectedToGrid();
 	void UpdateCamera(const Vec2 &delta);
+	void CenterOn(const Vec2 &point, const Vec2 &screenSize);   // pan to centre a point
 	void Zoom(float ratio, const Vec2 &mouse);
 	void ZoomBoard(const Vec2 &screenSize);
 	void ZoomObjects(const Vec2 &screenSize);

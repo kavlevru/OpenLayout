@@ -19,6 +19,7 @@ public:
 
     void PlaceObject(Object *object);
     void PlaceObjectGroup(const ObjectGroup &objects);
+    void CenterOn(const Vec2 &point) { board->CenterOn(point, currentSize); update(); }
 
     void SetBoard(Board *_board) {
         board = _board;

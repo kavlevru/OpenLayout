@@ -653,29 +653,57 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     panelComponentsAct->setCheckable(true);
     connect(panelComponentsAct, &QAction::toggled, compDock, &QDockWidget::setVisible);
     connect(compDock, &QDockWidget::visibilityChanged, panelComponentsAct, &QAction::setChecked);
+
+    // DRC panel: run the check, list the violations, click one to centre on it.
+    QDockWidget *drcDock = new QDockWidget(_("DRC"), this);
+    {
+        QWidget *panel = new QWidget(drcDock);
+        QVBoxLayout *dl = new QVBoxLayout(panel);
+        QPushButton *run = new QPushButton(_("Run DRC"), panel);
+        QListWidget *drcList = new QListWidget(panel);
+        dl->addWidget(run);
+        dl->addWidget(drcList);
+        drcDock->setWidget(panel);
+
+        auto runDrc = [this, drcList](){
+            drcList->clear();
+            auto issues = pcb.GetSelectedBoard()->CheckDRC(settings.groundDistance);
+            if(issues.empty()) {
+                drcList->addItem(_("No violations."));
+                return;
+            }
+            for(const auto &is : issues) {
+                QListWidgetItem *it = new QListWidgetItem(QString("%1  (%2, %3)")
+                    .arg(QString::fromStdString(is.second))
+                    .arg(is.first.x, 0, 'f', 2).arg(is.first.y, 0, 'f', 2));
+                it->setData(Qt::UserRole, QPointF(is.first.x, is.first.y));
+                drcList->addItem(it);
+            }
+        };
+        connect(run, &QPushButton::clicked, this, runDrc);
+        connect(drcList, &QListWidget::currentRowChanged, this, [this, drcList](int row){
+            if(row < 0)
+                return;
+            QVariant v = drcList->item(row)->data(Qt::UserRole);
+            if(v.isValid()) {
+                QPointF p = v.toPointF();
+                mainCanvas->CenterOn(Vec2(p.x(), p.y()));
+            }
+        });
+        connect(drcDock, &QDockWidget::visibilityChanged, this,
+                [runDrc](bool vis){ if(vis) runDrc(); });
+    }
+    addDockWidget(Qt::RightDockWidgetArea, drcDock);
+    drcDock->hide();
+    panelDrcAct->setCheckable(true);
+    connect(panelDrcAct, &QAction::toggled, drcDock, &QDockWidget::setVisible);
+    connect(drcDock, &QDockWidget::visibilityChanged, panelDrcAct, &QAction::setChecked);
     connect(footprintAct,     &QAction::triggered, this, importElements);
 
     // Reset solder mask on all objects.
     connect(resetMaskAct, &QAction::triggered, this,
             editUndo([](Board *b){ b->ResetSoldermask(); }));
 
-    // DRC: report copper-clearance violations and unrouted connections.
-    connect(panelDrcAct, &QAction::triggered, this, [this](){
-        auto issues = pcb.GetSelectedBoard()->CheckDRC(settings.groundDistance);
-        if(issues.empty()) {
-            QMessageBox::information(this, _("DRC"), _("No design-rule violations found."));
-            return;
-        }
-        QString text = QString(_("%1 issue(s) found:\n\n")).arg((int) issues.size());
-        int shown = 0;
-        for(const auto &is : issues) {
-            if(shown++ >= 40) { text += "…\n"; break; }
-            text += QString("• %1  @ (%2, %3)\n")
-                .arg(QString::fromStdString(is.second))
-                .arg(is.first.x, 0, 'f', 2).arg(is.first.y, 0, 'f', 2);
-        }
-        QMessageBox::warning(this, _("DRC"), text);
-    });
 
     // List drillings: summarise the through holes by diameter.
     connect(listDrillingsAct, &QAction::triggered, this, [this](){

@@ -168,6 +168,10 @@ void Board::UpdateCamera(const Vec2 &delta) {
 	camera -= delta;
 }
 
+void Board::CenterOn(const Vec2 &point, const Vec2 &screenSize) {
+	camera = point - screenSize / (2.0f * (float) zoom);
+}
+
 void Board::SaveView() {
 	viewHistory.push_back({camera, zoom});
 	if(viewHistory.size() > 64)
