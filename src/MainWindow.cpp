@@ -537,11 +537,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     // Import elements / load macro / place footprint: append objects from such
     // a file (all three use the same OpenLayout macro format).
-    auto importElements = [this](){
-        QString path = QFileDialog::getOpenFileName(this, _("Import elements"), QString(),
-                                                    "OpenLayout macro (*.olm);;All files (*)");
-        if(path.isEmpty())
-            return;
+    auto loadMacro = [this](const QString &path){
         File f(path.toLocal8Bit().constData(), "rb");
         if(!f.IsOk()) {
             QMessageBox::warning(this, _("Import elements"), _("Could not open the file."));
@@ -560,7 +556,53 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         }
         mainCanvas->update();
     };
+    auto importElements = [this, loadMacro](){
+        QString path = QFileDialog::getOpenFileName(this, _("Import elements"), QString(),
+                                                    "OpenLayout macro (*.olm);;All files (*)");
+        if(!path.isEmpty())
+            loadMacro(path);
+    };
     connect(elementImportAct, &QAction::triggered, this, importElements);
+
+    // Macro-Library panel: list .olm macros from the macro folder; double-click
+    // loads one onto the board (selected, ready to drag into place).
+    QDockWidget *macroDock = new QDockWidget(_("Macro-Library"), this);
+    {
+        QWidget *panel = new QWidget(macroDock);
+        QVBoxLayout *ml = new QVBoxLayout(panel);
+        QPushButton *folder = new QPushButton(_("Folder…"), panel);
+        QListWidget *macroList = new QListWidget(panel);
+        ml->addWidget(folder);
+        ml->addWidget(macroList);
+        macroDock->setWidget(panel);
+
+        auto refreshMacros = [this, macroList](){
+            macroList->clear();
+            QDir dir(QString::fromLocal8Bit(settings.macroDir));
+            if(settings.macroDir[0] && dir.exists())
+                macroList->addItems(dir.entryList(QStringList() << "*.olm", QDir::Files, QDir::Name));
+        };
+        connect(folder, &QPushButton::clicked, this, [this, refreshMacros](){
+            QString d = QFileDialog::getExistingDirectory(this, _("Macro folder"),
+                            QString::fromLocal8Bit(settings.macroDir));
+            if(!d.isEmpty()) {
+                strncpy(settings.macroDir, d.toLocal8Bit().constData(), sizeof(settings.macroDir) - 1);
+                settings.macroDir[sizeof(settings.macroDir) - 1] = '\0';
+                refreshMacros();
+            }
+        });
+        connect(macroList, &QListWidget::itemDoubleClicked, this,
+                [this, loadMacro](QListWidgetItem *item){
+            loadMacro(QString::fromLocal8Bit(settings.macroDir) + "/" + item->text());
+        });
+        connect(macroDock, &QDockWidget::visibilityChanged, this,
+                [refreshMacros](bool vis){ if(vis) refreshMacros(); });
+    }
+    addDockWidget(Qt::RightDockWidgetArea, macroDock);
+    macroDock->hide();
+    panelMacroAct->setCheckable(true);
+    connect(panelMacroAct, &QAction::toggled, macroDock, &QDockWidget::setVisible);
+    connect(macroDock, &QDockWidget::visibilityChanged, panelMacroAct, &QAction::setChecked);
     connect(footprintAct,     &QAction::triggered, this, importElements);
 
     // Reset solder mask on all objects.
