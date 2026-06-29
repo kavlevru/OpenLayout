@@ -704,6 +704,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(resetMaskAct, &QAction::triggered, this,
             editUndo([](Board *b){ b->ResetSoldermask(); }));
 
+    // Copper pour: fill the selected zone (Poly), clearing other-net copper.
+    connect(fillZoneAct, &QAction::triggered, this, [this](){
+        Board *b = pcb.GetSelectedBoard();
+        Object *sel = b->GetFirstSelected();
+        if(!sel || sel->GetType() != Object::POLY) {
+            QMessageBox::information(this, _("Fill zone"),
+                _("Select a zone (filled polygon) first."));
+            return;
+        }
+        PushUndo();
+        b->FillZone(sel, settings.groundDistance, settings.trackSize);
+        mainCanvas->update();
+    });
+
 
     // List drillings: summarise the through holes by diameter.
     connect(listDrillingsAct, &QAction::triggered, this, [this](){
@@ -1242,6 +1256,7 @@ void MainWindow::CreateActions() {
     listDrillingsAct    = new QAction(_("&List drillings"), this);
     footprintAct        = new QAction(_("&Footprint-Wizard"), this);
     resetMaskAct        = new QAction(_("R&eset solder mask"), this);
+    fillZoneAct         = new QAction(_("Fill &zone (copper pour)"), this);
     deleteOutsideAct    = new QAction(_("&Delete elements outside the board"), this);
     elementExportAct    = new QAction(_("Te&xt-IO: Export elements"), this);
     elementImportAct    = new QAction(_("&Text-IO: Import elements"), this);
@@ -1377,6 +1392,7 @@ void MainWindow::CreateMenuBar() {
         menu->addAction(footprintAct);
 		menu->addSeparator();
         menu->addAction(resetMaskAct);
+        menu->addAction(fillZoneAct);
         menu->addAction(removeConAct);
         menu->addAction(deleteOutsideAct);
 		menu->addSeparator();

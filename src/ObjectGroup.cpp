@@ -428,6 +428,103 @@ std::vector<std::pair<Vec2, std::string>> ObjectGroup::CheckDRC(float clearance)
 	return issues;
 }
 
+// Edge distance from a point to an object's copper outline (negative if inside).
+static float distToOutlineEdge(const Vec2 &p, const Object *o) {
+	std::vector<Vec2> pts;
+	float hw;
+	shapeOf(o, pts, hw);
+	float best = FLT_MAX;
+	if(pts.size() == 1)
+		best = (p - pts[0]).Length();
+	else
+		for(size_t j = 0; j + 1 < pts.size(); j++)
+			best = std::min(best, pointSeg(p, pts[j], pts[j + 1]));
+	return best - hw;
+}
+
+void ObjectGroup::FillZone(Object *zone, float clearance, float lineWidth) {
+	if(!zone || zone->GetType() != Object::POLY)
+		return;
+	PolygonBase *pb = (PolygonBase*) zone;
+	int n = pb->points.Size();
+	if(n < 3)
+		return;
+	uint8_t layer = zone->GetLayer();
+	if(!layerIsCopper(layer))
+		return;
+
+	std::vector<Vec2> poly;
+	for(int i = 0; i < n; i++)
+		poly.push_back(pb->points[i]);
+
+	// Flood copper into nets, then pick the net dominant inside the zone.
+	std::vector<Object*> cop;
+	for(Object *o = objects; o; o = o->next)
+		if(copperMask(o))
+			cop.push_back(o);
+	std::map<Object*, int> net;
+	int nid = 0;
+	for(Object *s : cop) {
+		if(net.count(s)) continue;
+		std::vector<Object*> st = {s};
+		net[s] = nid;
+		while(!st.empty()) {
+			Object *x = st.back(); st.pop_back();
+			for(Object *y : cop)
+				if(!net.count(y) && objectsConnect(x, y)) { net[y] = nid; st.push_back(y); }
+		}
+		nid++;
+	}
+	std::map<int, int> inside;
+	for(Object *o : cop)
+		if(o != zone && utils::PointInConcavePolygon(o->GetPosition(), n, poly.data()))
+			inside[net[o]]++;
+	int zoneNet = -1, bestCount = 0;
+	for(auto &kv : inside)
+		if(kv.second > bestCount) { bestCount = kv.second; zoneNet = kv.first; }
+
+	float keep = clearance + lineWidth * 0.5f;
+	uint32_t grp = GetFreeGroup();
+	float s = lineWidth;
+	AABB box = zone->GetAABB();
+
+	auto blocked = [&](const Vec2 &p) -> bool {
+		for(Object *o : cop) {
+			if(o == zone || net[o] == zoneNet || !(copperMask(o) & (1 << layer)))
+				continue;
+			if(!o->GetAABB().Expand(keep).TestPoint(p))
+				continue;
+			if(distToOutlineEdge(p, o) < keep)
+				return true;
+		}
+		return false;
+	};
+	auto emitRun = [&](const Vec2 &a, const Vec2 &b) {
+		Vec2 pts[2] = {a, b};
+		Track *t = new Track(layer, clearance, lineWidth, pts, 2);
+		t->groups.Add(grp);
+		t->SetPlaced();
+		AddObjectEnd(t);
+	};
+
+	for(float y = box.lower.y; y <= box.upper.y; y += s) {
+		bool run = false;
+		Vec2 a;
+		float prevx = box.lower.x;
+		for(float x = box.lower.x; x <= box.upper.x; x += s) {
+			Vec2 p(x, y);
+			bool ok = utils::PointInConcavePolygon(p, n, poly.data()) && !blocked(p);
+			if(ok && !run) { run = true; a = p; }
+			else if(!ok && run) { run = false; emitRun(a, Vec2(prevx, y)); }
+			prevx = x;
+		}
+		if(run)
+			emitRun(a, Vec2(prevx, y));
+	}
+
+	RemoveObject(zone);   // the cleared fill replaces the naive solid polygon
+}
+
 void ObjectGroup::SelectConnected(Object *start) {
 	UnselectAll();
 	if(!start || !copperMask(start))

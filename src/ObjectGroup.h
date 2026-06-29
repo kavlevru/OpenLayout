@@ -59,6 +59,7 @@ public:
 	void ResetSoldermask();                 // clear the soldermask flag on all objects
 	void SelectConnected(Object *start);    // select the copper net touching `start` (continuity test)
 	std::vector<std::pair<Vec2, std::string>> CheckDRC(float clearance) const;  // {position, message}
+	void FillZone(Object *zone, float clearance, float lineWidth);  // copper-pour a Poly zone
 	void ToggleSoldermask(Object *object);  // include/exclude one object from the solder mask
 	void DrawSoldermaskMarked() const;      // overlay objects flagged for the solder mask
 	void SetSelectedWidth(float width);     // set line width on the selected objects

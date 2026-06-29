@@ -71,7 +71,7 @@ private:
             *boardSetLeftAct, *boardSetRightAct, *changeSideAct, *copyAct,
             *cutAct, *deleteAct, *deleteOutsideAct, *directoriesAct, *drillDataAct,
             *duplicateAct, *elementExportAct, *elementImportAct, *exitAct,
-            *footprintAct, *gerberExportAct, *gerberImportAct, *groupAct,
+            *fillZoneAct, *footprintAct, *gerberExportAct, *gerberImportAct, *groupAct,
             *hmirrorAct, *isolationAct, *layerC1Act, *layerC2Act, *layerI1Act,
             *layerI2Act, *layerOAct, *layerS1Act, *layerS2Act, *listDrillingsAct,
             *massiveAct, *newAct, *openAct, *panelComponentsAct, *panelDrcAct,
