@@ -603,6 +603,56 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     panelMacroAct->setCheckable(true);
     connect(panelMacroAct, &QAction::toggled, macroDock, &QDockWidget::setVisible);
     connect(macroDock, &QDockWidget::visibilityChanged, panelMacroAct, &QAction::setChecked);
+
+    // Components panel: list the grouped objects (placed footprints/macros) as
+    // components; clicking one selects all of its objects.
+    QDockWidget *compDock = new QDockWidget(_("Components"), this);
+    {
+        QWidget *panel = new QWidget(compDock);
+        QVBoxLayout *cl = new QVBoxLayout(panel);
+        QPushButton *refresh = new QPushButton(_("Refresh"), panel);
+        QListWidget *compList = new QListWidget(panel);
+        cl->addWidget(refresh);
+        cl->addWidget(compList);
+        compDock->setWidget(panel);
+
+        auto refreshComps = [this, compList](){
+            compList->clear();
+            std::vector<uint32_t> gids;
+            for(Object *o = pcb.GetSelectedBoard()->GetObjects(); o; o = o->GetNext())
+                for(int i = 0; i < o->groups.Size(); i++) {
+                    uint32_t g = o->groups[i];
+                    if(std::find(gids.begin(), gids.end(), g) == gids.end())
+                        gids.push_back(g);
+                }
+            std::sort(gids.begin(), gids.end());
+            int n = 0;
+            for(uint32_t g : gids) {
+                QListWidgetItem *it = new QListWidgetItem(QString(_("Component %1")).arg(++n));
+                it->setData(Qt::UserRole, g);
+                compList->addItem(it);
+            }
+        };
+        connect(refresh, &QPushButton::clicked, this, refreshComps);
+        connect(compList, &QListWidget::currentRowChanged, this, [this, compList](int row){
+            if(row < 0)
+                return;
+            uint32_t g = compList->item(row)->data(Qt::UserRole).toUInt();
+            Board *b = pcb.GetSelectedBoard();
+            b->UnselectAll();
+            for(Object *o = b->GetObjects(); o; o = o->GetNext())
+                if(o->groups.Find(g))
+                    o->Select();
+            mainCanvas->update();
+        });
+        connect(compDock, &QDockWidget::visibilityChanged, this,
+                [refreshComps](bool vis){ if(vis) refreshComps(); });
+    }
+    addDockWidget(Qt::RightDockWidgetArea, compDock);
+    compDock->hide();
+    panelComponentsAct->setCheckable(true);
+    connect(panelComponentsAct, &QAction::toggled, compDock, &QDockWidget::setVisible);
+    connect(compDock, &QDockWidget::visibilityChanged, panelComponentsAct, &QAction::setChecked);
     connect(footprintAct,     &QAction::triggered, this, importElements);
 
     // Reset solder mask on all objects.
