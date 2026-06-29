@@ -490,7 +490,12 @@ void ObjectGroup::FillZone(Object *zone, float clearance, float lineWidth) {
 
 	auto blocked = [&](const Vec2 &p) -> bool {
 		for(Object *o : cop) {
-			if(o == zone || net[o] == zoneNet || !(copperMask(o) & (1 << layer)))
+			if(o == zone || net[o] == zoneNet)
+				continue;
+			// Through-pads pierce every layer, so the pour must clear their holes
+			// regardless of layer; other copper only matters on the pour layer.
+			bool through = (o->GetType() == Object::THT_PAD);
+			if(!through && !(copperMask(o) & (1 << layer)))
 				continue;
 			if(!o->GetAABB().Expand(keep).TestPoint(p))
 				continue;
